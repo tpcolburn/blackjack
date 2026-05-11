@@ -348,7 +348,8 @@ function pSplit(){
 function pNew(){
   if(G.br<=0)G.br=1000;
   G.pp='bet';G.oc=null;G.pH=[[]];G.dH=[];G.aH=0;G.hint=null;G.curDecs=[];G.handBsNet=null;
-  G.bet=0;
+  var prev=(G.savedHand&&G.savedHand.bet)||G.bet||0;
+  G.bet=Math.min(prev,G.br);
   render();
 }
 
