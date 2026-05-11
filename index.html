@@ -98,6 +98,12 @@ html { height: -webkit-fill-available; }
 .pbar-fill { height: 100%; border-radius: 3px; }
 .hist-row { display: flex; justify-content: space-between; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid #1a3060; gap: 8px; }
 .reset-link { background: none; border: none; color: #553366; font-size: 12px; cursor: pointer; font-family: inherit; text-decoration: underline; display: block; margin: 10px auto 0; }
+.recent5-label { font-size: 10px; color: #6688aa; text-align: center; margin-top: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; }
+.recent5 { display: flex; gap: 6px; justify-content: center; margin-top: 6px; flex-wrap: wrap; }
+.recent5-item { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; border-radius: 16px; font-size: 11px; font-weight: 700; border: 1px solid; }
+.recent5-win { background: rgba(39,174,96,0.18); color: #2ecc71; border-color: rgba(39,174,96,0.4); }
+.recent5-loss { background: rgba(231,76,60,0.18); color: #e74c3c; border-color: rgba(231,76,60,0.35); }
+.recent5-push { background: rgba(102,136,170,0.15); color: #8899bb; border-color: rgba(102,136,170,0.3); }
 </style>
 </head>
 <body>
@@ -535,6 +541,19 @@ function render(){
       '</div>';
   }
 
+  var recent5H='';
+  if(G.gs.history.length>0){
+    var last5=G.gs.history.slice(-5);
+    var items=last5.map(function(h){
+      var net=h.actualNet;
+      var cls=net>0?'win':net<0?'loss':'push';
+      var sym=net>0?'W':net<0?'L':'P';
+      var amt=(net>=0?'+$':'-$')+Math.abs(net);
+      return '<span class="recent5-item recent5-'+cls+'" title="Hand #'+h.num+'">'+sym+' '+amt+'</span>';
+    }).join('');
+    recent5H='<div class="recent5-label">Last '+last5.length+' hand'+(last5.length===1?'':'s')+'</div><div class="recent5">'+items+'</div>';
+  }
+
   el.innerHTML=
     '<div class="topbar">'+
       '<div>'+
@@ -550,6 +569,7 @@ function render(){
       handsH+
     '</div>'+
     '<div class="controls">'+ctrlH+'</div>'+
+    recent5H+
     '<div style="text-align:center;font-size:11px;color:#334466;margin-top:10px;padding-bottom:1rem">6-deck · Vegas Strip · Blackjack 3:2 · Double any 2 cards · Split once · Dealer hits soft 17 (H17)</div>';
 }
 
