@@ -63,7 +63,7 @@ html { height: -webkit-fill-available; }
 .chip-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
 .chip { width: 56px; height: 56px; border-radius: 50%; border: 3px dashed rgba(255,255,255,0.45); cursor: pointer; font-size: 13px; font-weight: 800; color: #fff; display: flex; align-items: center; justify-content: center; transition: transform .1s, box-shadow .1s; box-shadow: 0 2px 6px rgba(0,0,0,0.4); user-select: none; touch-action: manipulation; }
 .chip:hover { transform: translateY(-2px); }
-.chip.sel { transform: translateY(-4px) scale(1.12); box-shadow: 0 6px 14px rgba(0,0,0,0.6), 0 0 0 3px #fff; }
+.chip:active { transform: scale(0.92); box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
 .chip-5 { background: #c0392b; }
 .chip-10 { background: #2471a3; }
 .chip-25 { background: #1e8449; }
@@ -230,7 +230,7 @@ function runBSSim(playerHand,dealerHand,shoe0,si0,betAmt){
 // ── STATE ──────────────────────────────────────────────────────
 var G = {
   screen:'game', shoe:mkShoe(), si:0,
-  br:1000, bet:25,
+  br:1000, bet:0,
   pH:[[]], pB:[25], splt:[false],
   dH:[], aH:0, pp:'bet', oc:null, hint:null,
   curDecs:[], handBsNet:null, preDealBr:1000, savedHand:null, handDecs:[],
@@ -342,7 +342,12 @@ function pSplit(){
 function pNew(){
   if(G.br<=0)G.br=1000;
   G.pp='bet';G.oc=null;G.pH=[[]];G.dH=[];G.aH=0;G.hint=null;G.curDecs=[];G.handBsNet=null;
+  G.bet=0;
   render();
+}
+
+function resetBankroll(){
+  G.br=1000; G.bet=0; render();
 }
 
 function toggleHint(){
@@ -469,12 +474,21 @@ function render(){
 
   var ctrlH='';
   if(G.pp==='bet'){
-    if(G.br<=0){ctrlH='<div style="text-align:center;padding:2rem 0"><p style="color:#e74c3c;font-size:16px;font-weight:700;margin-bottom:14px">Out of chips!</p><button class="btn btn-deal" onclick="G.br=1000;render()">Reset to $1,000</button></div>';}
-    else{
+    if(G.br<=0){
+      ctrlH='<div style="text-align:center;padding:2rem 0"><p style="color:#e74c3c;font-size:16px;font-weight:700;margin-bottom:14px">Out of chips!</p><button class="btn btn-deal" onclick="resetBankroll()">Reset to $1,000</button></div>';
+    }else{
       var chips=[5,10,25,50,100].filter(function(v){return v<=G.br;});
-      ctrlH='<div class="controls-label">Place your bet</div>'+
-        '<div class="chip-row">'+chips.map(function(v){return '<div class="chip chip-'+v+(G.bet===v?' sel':'')+'" onclick="G.bet='+v+';render()">$'+v+'</div>';}).join('')+
-        '<input class="bet-input" type="number" min="1" max="'+G.br+'" value="'+G.bet+'" oninput="G.bet=Math.max(1,Math.min(parseInt(this.value)||1,'+G.br+'));render()">'+
+      ctrlH='<div class="controls-label">Place your bet — tap chips to add</div>'+
+        '<div class="chip-row">'+
+          chips.map(function(v){
+            return '<div class="chip chip-'+v+'" onclick="G.bet=Math.min(G.bet+'+v+',G.br);render()">+$'+v+'</div>';
+          }).join('')+
+        '</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">'+
+          '<span style="color:#8888aa;font-size:13px;font-weight:600">Bet:</span>'+
+          '<input class="bet-input" type="number" min="0" max="'+G.br+'" value="'+G.bet+'" oninput="G.bet=Math.max(0,Math.min(parseInt(this.value)||0,'+G.br+'));render()">'+
+          '<button class="btn btn-action" onclick="G.bet=0;render()" style="padding:9px 14px;font-size:13px" '+(G.bet===0?'disabled':'')+'>Clear bet</button>'+
+          '<button class="btn btn-action" onclick="resetBankroll()" style="padding:9px 14px;font-size:13px;border-color:#553399;color:#cc99ff">Reset $1k</button>'+
         '</div>'+
         '<button class="btn btn-deal" onclick="pDeal()" '+(G.bet<=0||G.bet>G.br?'disabled':'')+'>Deal — bet $'+G.bet+'</button>';
     }
