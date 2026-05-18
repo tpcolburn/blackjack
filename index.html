@@ -452,6 +452,88 @@ function labPreview(){
   prev.innerHTML='Target profit: <b style="color:#ffc107">+$'+(sum*unitVal)+'</b> &nbsp;·&nbsp; '+nums.length+' numbers &nbsp;·&nbsp; First bet: <b style="color:#a0c4ff">$'+firstBet+'</b>';
 }
 
+// ── MONTE CARLO SIM (empirical outcome dist from 1M-hand offline run) ──
+var BJ_OUTCOMES=[
+  [-4.0,0.000301],[-3.0,0.001826],[-2.0,0.043839],
+  [-1.0,0.401146],[-0.5,0.04509],[0.0,0.084412],
+  [1.0,0.313826],[1.5,0.044963],[2.0,0.061384],
+  [3.0,0.002667],[4.0,0.000546]
+];
+var BJ_CDF=(function(){var c=[],acc=0;for(var i=0;i<BJ_OUTCOMES.length;i++){acc+=BJ_OUTCOMES[i][1];c.push([BJ_OUTCOMES[i][0],acc]);}return c;})();
+function sampleOutcome(){var r=Math.random();for(var i=0;i<BJ_CDF.length;i++)if(r<=BJ_CDF[i][1])return BJ_CDF[i][0];return BJ_CDF[BJ_CDF.length-1][0];}
+
+function simSession(originalSeq,unitValue,bankroll,tableMax,maxHands){
+  var seq=originalSeq.slice(),br=bankroll,sessionNet=0,hands=0,peakBet=0;
+  while(seq.length>0&&hands<maxHands){
+    var betUnits=seq.length===1?seq[0]:seq[0]+seq[seq.length-1];
+    var bet=betUnits*unitValue;
+    if(bet>tableMax)return{outcome:'bust_table',hands:hands,peakBet:peakBet,sessionNet:sessionNet};
+    if(bet>br)return{outcome:'bust_bankroll',hands:hands,peakBet:peakBet,sessionNet:sessionNet};
+    if(bet>peakBet)peakBet=bet;
+    var r=sampleOutcome();
+    var net=r*bet;
+    sessionNet+=net; br+=net; hands++;
+    if(r>0){if(seq.length<=2)seq=[];else{seq.shift();seq.pop();}}
+    else if(r<0)seq.push(Math.abs(r)*betUnits);
+  }
+  if(seq.length===0)return{outcome:'complete',hands:hands,peakBet:peakBet,sessionNet:sessionNet};
+  return{outcome:'timeout',hands:hands,peakBet:peakBet,sessionNet:sessionNet};
+}
+
+function runMC(seq,unitValue,bankroll,tableMax,maxHands,N){
+  N=N||5000;
+  var oc={complete:0,bust_bankroll:0,bust_table:0,timeout:0};
+  var hands=[],peaks=[],nets=[];
+  for(var i=0;i<N;i++){
+    var r=simSession(seq,unitValue,bankroll,tableMax,maxHands);
+    oc[r.outcome]++; hands.push(r.hands); peaks.push(r.peakBet); nets.push(r.sessionNet);
+  }
+  function p(a,q){var s=a.slice().sort(function(x,y){return x-y;});return s[Math.min(s.length-1,Math.floor(q*s.length))];}
+  function mean(a){var s=0;for(var i=0;i<a.length;i++)s+=a[i];return s/a.length;}
+  return{N:N,
+    completeRate:oc.complete/N, bustBankrollRate:oc.bust_bankroll/N, bustTableRate:oc.bust_table/N, timeoutRate:oc.timeout/N,
+    meanHands:mean(hands), p50Hands:p(hands,0.5), p95Hands:p(hands,0.95),
+    meanPeakBet:mean(peaks), p95PeakBet:p(peaks,0.95),
+    meanSessionNet:mean(nets), p5SessionNet:p(nets,0.05), p95SessionNet:p(nets,0.95)
+  };
+}
+
+function mcRun(){
+  var seqInp=document.getElementById('lab-seq-inp');
+  var uvInp=document.getElementById('lab-uv-inp');
+  var brInp=document.getElementById('mc-br-inp');
+  var tmInp=document.getElementById('mc-tm-inp');
+  var mhInp=document.getElementById('mc-mh-inp');
+  var out=document.getElementById('mc-result');
+  if(!seqInp||!out)return;
+  var nums=(seqInp.value||'').trim().split(/[\s,]+/).map(Number).filter(function(n){return n>0&&!isNaN(n);});
+  if(!nums.length){out.innerHTML='<span style="color:#e74c3c">Enter a sequence first.</span>';return;}
+  var uv=Math.max(1,parseFloat((uvInp&&uvInp.value)||5)||5);
+  var br=Math.max(1,parseFloat((brInp&&brInp.value)||1000)||1000);
+  var tm=Math.max(1,parseFloat((tmInp&&tmInp.value)||5000)||5000);
+  var mh=Math.max(10,parseInt((mhInp&&mhInp.value)||200)||200);
+  out.innerHTML='<span style="color:#6688aa">Running 5,000 simulations…</span>';
+  setTimeout(function(){
+    var t0=Date.now();
+    var s=runMC(nums,uv,br,tm,mh,5000);
+    var ms=Date.now()-t0;
+    var failRate=s.bustBankrollRate+s.bustTableRate+s.timeoutRate;
+    var col=s.completeRate>=0.9?'#2ecc71':s.completeRate>=0.75?'#f39c12':'#e74c3c';
+    out.innerHTML=
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">'+
+        '<div><div style="font-size:10px;color:#6688aa;text-transform:uppercase;letter-spacing:1px;font-weight:700">Completion</div><div style="font-size:22px;font-weight:800;color:'+col+'">'+(s.completeRate*100).toFixed(1)+'%</div></div>'+
+        '<div><div style="font-size:10px;color:#6688aa;text-transform:uppercase;letter-spacing:1px;font-weight:700">Failure</div><div style="font-size:22px;font-weight:800;color:#e74c3c">'+(failRate*100).toFixed(1)+'%</div></div>'+
+      '</div>'+
+      '<div style="font-size:12px;color:#a0b8d0;line-height:1.7">'+
+        '<div>• Bankroll bust: <b>'+(s.bustBankrollRate*100).toFixed(1)+'%</b>  ·  Table-cap bust: <b>'+(s.bustTableRate*100).toFixed(1)+'%</b>  ·  Timeout: <b>'+(s.timeoutRate*100).toFixed(1)+'%</b></div>'+
+        '<div>• Hands to complete: mean <b>'+s.meanHands.toFixed(1)+'</b>, p50 <b>'+s.p50Hands+'</b>, p95 <b>'+s.p95Hands+'</b></div>'+
+        '<div>• Peak bet: mean <b>$'+s.meanPeakBet.toFixed(0)+'</b>, p95 <b>$'+s.p95PeakBet.toFixed(0)+'</b></div>'+
+        '<div>• Session net: mean <b style="color:'+(s.meanSessionNet>=0?'#2ecc71':'#e74c3c')+'">'+(s.meanSessionNet>=0?'+':'')+'$'+s.meanSessionNet.toFixed(0)+'</b>, p5 <b style="color:#e74c3c">-$'+Math.abs(s.p5SessionNet).toFixed(0)+'</b>, p95 <b style="color:#2ecc71">+$'+s.p95SessionNet.toFixed(0)+'</b></div>'+
+      '</div>'+
+      '<div style="font-size:10px;color:#4466aa;margin-top:6px">5,000 trials · '+ms+'ms · house edge baked in (mean session net should be slightly negative)</div>';
+  },10);
+}
+
 function pSurrender(){
   if(!canSurrender())return;
   var aH=G.aH,hand=G.pH[aH],bet=G.pB[aH];
@@ -636,6 +718,17 @@ function render(){
           '</div>'+
         '</div>'+
         '<button class="btn btn-deal" onclick="labInit(document.getElementById(\'lab-seq-inp\').value,document.getElementById(\'lab-uv-inp\').value)">Start sequence</button>'+
+        '<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1a3060">'+
+          '<div class="lab-title" style="margin-bottom:8px"><span>🧪 Test this sequence (Monte Carlo)</span></div>'+
+          '<div style="font-size:11px;color:#6688aa;margin-bottom:8px">Simulates 5,000 sessions with the sequence + unit above. Adjust constraints to see how it performs.</div>'+
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'+
+            '<div><div style="font-size:11px;color:#8899bb;margin-bottom:3px">Bankroll ($)</div><input id="mc-br-inp" class="lab-input" style="width:100px" type="number" min="1" value="1000"></div>'+
+            '<div><div style="font-size:11px;color:#8899bb;margin-bottom:3px">Table max ($)</div><input id="mc-tm-inp" class="lab-input" style="width:100px" type="number" min="1" value="5000"></div>'+
+            '<div><div style="font-size:11px;color:#8899bb;margin-bottom:3px">Max hands</div><input id="mc-mh-inp" class="lab-input" style="width:90px" type="number" min="10" value="200"></div>'+
+          '</div>'+
+          '<button class="btn btn-action" onclick="mcRun()" style="margin-bottom:10px">▶ Run 5,000 simulations</button>'+
+          '<div id="mc-result" style="font-size:13px;color:#a0b8d0;padding:10px;background:#0f1f3a;border-radius:8px;border:1px solid #1a3060;min-height:40px"><span style="color:#4466aa;font-style:italic">Results will appear here.</span></div>'+
+        '</div>'+
         '</div>'+
         normalBetBlock();
     }else{
