@@ -104,6 +104,21 @@ html { height: -webkit-fill-available; }
 .recent5-win { background: rgba(39,174,96,0.18); color: #2ecc71; border-color: rgba(39,174,96,0.4); }
 .recent5-loss { background: rgba(231,76,60,0.18); color: #e74c3c; border-color: rgba(231,76,60,0.35); }
 .recent5-push { background: rgba(102,136,170,0.15); color: #8899bb; border-color: rgba(102,136,170,0.3); }
+.lab-panel { background: #080f20; border: 1.5px solid #1a3060; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.lab-title { font-size: 11px; font-weight: 700; color: #6688aa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.lab-stat-row { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: #6688aa; margin-bottom: 8px; }
+.lab-stat-row b { color: #c0d0e0; }
+.lab-seq-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0 8px; }
+.lab-n { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 34px; border-radius: 7px; font-size: 14px; font-weight: 700; background: #0f2040; color: #8899bb; border: 1.5px solid #1a3060; padding: 0 7px; }
+.lab-n.lab-hi { background: #2a1e00; color: #ffc107; border-color: #ffc107; }
+.lab-bet-line { font-size: 13px; color: #a0b8d0; }
+.lab-hist-row { font-size: 12px; color: #6688aa; padding: 3px 0; border-bottom: 0.5px solid #1a3060; }
+.lab-setup-panel { background: #080f20; border: 1.5px solid #1a3060; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.lab-input { background: #0f1f3a; border: 1.5px solid #1a5090; border-radius: 7px; color: #e0e0e0; padding: 9px 12px; font-family: inherit; font-size: 15px; min-height: 44px; }
+.lab-complete { background: #0d2a1a; border: 2px solid #1e8449; border-radius: 10px; padding: 16px; text-align: center; margin-bottom: 12px; }
+.lab-update { background: #080f20; border: 1.5px solid #1a3060; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+.lab-progress { height: 6px; border-radius: 3px; background: #1a3060; overflow: hidden; margin: 6px 0; }
+.lab-progress-fill { height: 100%; border-radius: 3px; background: #ffc107; transition: width .3s; }
 </style>
 </head>
 <body>
@@ -241,7 +256,8 @@ var G = {
   dH:[], aH:0, pp:'bet', oc:null, hint:null,
   curDecs:[], handBsNet:null, preDealBr:1000, savedHand:null, handDecs:[],
   gs:{hands:0,totalDecs:0,correctDecs:0,bsBr:1000,history:[],
-      catStats:{hard:{ok:0,n:0},soft:{ok:0,n:0},pair:{ok:0,n:0}}}
+      catStats:{hard:{ok:0,n:0},soft:{ok:0,n:0},pair:{ok:0,n:0}}},
+  lab:null, labShow:false
 };
 
 function setG(patch){for(var k in patch)G[k]=patch[k]; render();}
@@ -272,6 +288,7 @@ function finalizeStats(actualNet,decs,newBrVal){
   decs.forEach(function(d){newCat[d.cat]={ok:newCat[d.cat].ok+(d.correct?1:0),n:newCat[d.cat].n+1};});
   var rec={num:gs.hands+1,bet:sv?sv.bet:0,actualNet:actualNet,bsNet:bsNet,actualBrAfter:newBrVal,bsBrAfter:newBsBr,decs:decs.slice()};
   G.gs={hands:gs.hands+1,totalDecs:gs.totalDecs+decs.length,correctDecs:gs.correctDecs+decs.filter(function(d){return d.correct;}).length,bsBr:newBsBr,history:gs.history.concat([rec]).slice(-100),catStats:newCat};
+  labUpdate(actualNet);
 }
 
 function pDeal(){
@@ -348,13 +365,17 @@ function pSplit(){
 function pNew(){
   if(G.br<=0)G.br=1000;
   G.pp='bet';G.oc=null;G.pH=[[]];G.dH=[];G.aH=0;G.hint=null;G.curDecs=[];G.handBsNet=null;
-  var prev=(G.savedHand&&G.savedHand.bet)||G.bet||0;
-  G.bet=Math.min(prev,G.br);
+  if(G.lab&&G.lab.active&&!G.lab.complete){
+    G.bet=Math.min(labBet(),G.br);
+  }else{
+    var prev=(G.savedHand&&G.savedHand.bet)||G.bet||0;
+    G.bet=Math.min(prev,G.br);
+  }
   render();
 }
 
 function resetBankroll(){
-  G.br=1000; G.bet=0; render();
+  G.br=1000; G.bet=0; G.lab=null; G.labShow=false; render();
 }
 
 function toggleHint(){
@@ -369,6 +390,67 @@ function toggleHint(){
 function canDbl(){return G.aH>=0&&G.aH<G.pH.length&&G.pH[G.aH]&&G.pH[G.aH].length===2&&G.br>=G.pB[G.aH];}
 function canSpl(){return G.aH>=0&&G.aH<G.pH.length&&G.pH[G.aH]&&isPair(G.pH[G.aH])&&G.pH[G.aH].length===2&&G.br>=G.pB[G.aH]&&G.pH.length<3;}
 function canSurrender(){return G.aH>=0&&G.aH<G.pH.length&&G.pH[G.aH]&&G.pH[G.aH].length===2&&!G.splt[G.aH];}
+
+// ── LABOUCHÈRE ─────────────────────────────────────────────────
+function labBet(){
+  if(!G.lab||G.lab.seq.length===0)return 0;
+  if(G.lab.seq.length===1)return G.lab.seq[0]*G.lab.unitValue;
+  return(G.lab.seq[0]+G.lab.seq[G.lab.seq.length-1])*G.lab.unitValue;
+}
+
+function labInit(seqStr,unitVal){
+  var nums=seqStr.trim().split(/[\s,]+/).map(Number).filter(function(n){return n>0&&!isNaN(n);});
+  if(!nums.length){alert('Please enter a valid sequence of positive numbers.');return;}
+  var uv=Math.max(1,parseFloat(unitVal)||5);
+  var target=nums.reduce(function(a,b){return a+b;},0)*uv;
+  G.lab={active:true,original:nums.slice(),seq:nums.slice(),unitValue:uv,history:[],targetProfit:target,sessionNet:0,complete:false};
+  G.labShow=false;
+  G.bet=Math.min(labBet(),G.br);
+  render();
+}
+
+function labReset(){
+  G.lab=null; G.labShow=false; G.bet=0; render();
+}
+
+function labUpdate(actualNet){
+  if(!G.lab||!G.lab.active||G.lab.complete)return;
+  var seqBefore=G.lab.seq.slice();
+  var baseBetAmt=labBet();
+  var lossUnits=Math.abs(actualNet)/G.lab.unitValue;
+  G.lab.sessionNet+=actualNet;
+  var result=actualNet>0?'win':actualNet<0?'loss':'push';
+  if(actualNet>0){
+    if(G.lab.seq.length<=2)G.lab.seq=[];
+    else{G.lab.seq.shift();G.lab.seq.pop();}
+    if(G.lab.seq.length===0)G.lab.complete=true;
+  }else if(actualNet<0){
+    G.lab.seq.push(lossUnits);
+  }
+  G.lab.history.unshift({seqBefore:seqBefore,seqAfter:G.lab.seq.slice(),actualNet:actualNet,betAmt:baseBetAmt,lossUnits:lossUnits,result:result});
+  if(G.lab.history.length>30)G.lab.history.pop();
+}
+
+function labSeqHTML(seq,hi){
+  if(!seq.length)return'<span style="color:#27ae60;font-weight:700">Complete ✓</span>';
+  return seq.map(function(n,i){
+    var active=hi&&(i===0||(seq.length>1&&i===seq.length-1));
+    return'<span class="lab-n'+(active?' lab-hi':'')+'">'+n+'</span>';
+  }).join('');
+}
+
+function labPreview(){
+  var inp=document.getElementById('lab-seq-inp');
+  var uv=document.getElementById('lab-uv-inp');
+  var prev=document.getElementById('lab-preview');
+  if(!inp||!prev)return;
+  var nums=(inp.value||'').trim().split(/[\s,]+/).map(Number).filter(function(n){return n>0&&!isNaN(n);});
+  var unitVal=Math.max(1,parseFloat((uv&&uv.value)||5)||5);
+  if(!nums.length){prev.textContent='Enter a sequence above';return;}
+  var sum=nums.reduce(function(a,b){return a+b;},0);
+  var firstBet=(nums.length===1?nums[0]:(nums[0]+nums[nums.length-1]))*unitVal;
+  prev.innerHTML='Target profit: <b style="color:#ffc107">+$'+(sum*unitVal)+'</b> &nbsp;·&nbsp; '+nums.length+' numbers &nbsp;·&nbsp; First bet: <b style="color:#a0c4ff">$'+firstBet+'</b>';
+}
 
 function pSurrender(){
   if(!canSurrender())return;
@@ -479,25 +561,88 @@ function render(){
     return t+(s?' (soft)':'');
   }
 
+  function normalBetBlock(){
+    var chips=[5,10,25,50,100].filter(function(v){return v<=G.br;});
+    return '<div class="controls-label">Place your bet — tap chips to add</div>'+
+      '<div class="chip-row">'+
+        chips.map(function(v){
+          return '<div class="chip chip-'+v+'" onclick="G.bet=Math.min(G.bet+'+v+',G.br);render()">+$'+v+'</div>';
+        }).join('')+
+      '</div>'+
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">'+
+        '<span style="color:#8888aa;font-size:13px;font-weight:600">Bet:</span>'+
+        '<input class="bet-input" type="number" min="0" max="'+G.br+'" value="'+G.bet+'" oninput="G.bet=Math.max(0,Math.min(parseInt(this.value)||0,'+G.br+'));render()">'+
+        '<button class="btn btn-action" onclick="G.bet=0;render()" style="padding:9px 14px;font-size:13px" '+(G.bet===0?'disabled':'')+'>Clear bet</button>'+
+        '<button class="btn btn-action" onclick="resetBankroll()" style="padding:9px 14px;font-size:13px;border-color:#553399;color:#cc99ff">Reset $1k</button>'+
+      '</div>'+
+      '<button class="btn btn-deal" onclick="pDeal()" '+(G.bet<=0||G.bet>G.br?'disabled':'')+'>Deal — bet $'+G.bet+'</button>';
+  }
+
   var ctrlH='';
   if(G.pp==='bet'){
     if(G.br<=0){
       ctrlH='<div style="text-align:center;padding:2rem 0"><p style="color:#e74c3c;font-size:16px;font-weight:700;margin-bottom:14px">Out of chips!</p><button class="btn btn-deal" onclick="resetBankroll()">Reset to $1,000</button></div>';
+    }else if(G.lab&&G.lab.complete){
+      ctrlH='<div class="lab-complete">'+
+        '<div style="font-size:28px;margin-bottom:6px">🎯</div>'+
+        '<div style="font-weight:700;font-size:17px;color:#2ecc71;margin-bottom:4px">Labouchère Complete!</div>'+
+        '<div style="color:#a0b8d0;font-size:13px;margin-bottom:14px">Won <b style="color:#2ecc71">+$'+G.lab.sessionNet+'</b> of $'+G.lab.targetProfit+' target · '+G.lab.history.length+' hands played</div>'+
+        '<button class="btn btn-action" onclick="labReset()" style="margin-right:8px">Start new sequence</button>'+
+        '</div>'+
+        normalBetBlock();
+    }else if(G.lab&&G.lab.active){
+      var lb=labBet(),seq=G.lab.seq,orig=G.lab.original;
+      var seqLabel=seq.length>1?seq[0]+' + '+seq[seq.length-1]+' = '+(seq[0]+seq[seq.length-1])+' units':seq[0]+' unit'+(seq[0]!==1?'s':'');
+      var insufficient=lb>G.br;
+      var histH=G.lab.history.slice(0,5).map(function(h){
+        var arr=h.result==='win'?'✓ +$'+h.actualNet:h.result==='loss'?'✗ -$'+Math.abs(h.actualNet):'~ push';
+        var seqChange=h.result==='win'?'cancelled '+h.seqBefore[0]+(h.seqBefore.length>1?' & '+h.seqBefore[h.seqBefore.length-1]:''):h.result==='loss'?'added '+(h.lossUnits||h.betAmt/G.lab.unitValue):'no change';
+        return '<div class="lab-hist-row"><span style="color:'+(h.result==='win'?'#27ae60':h.result==='loss'?'#e74c3c':'#8888aa')+'">'+arr+'</span> <span style="color:#4466aa">— '+seqChange+'</span></div>';
+      }).join('');
+      ctrlH='<div class="lab-panel">'+
+        '<div class="lab-title"><span>🎯 Labouchère</span><button onclick="labReset()" style="background:none;border:none;color:#553366;font-size:12px;cursor:pointer;font-family:inherit">End sequence</button></div>'+
+        '<div class="lab-stat-row">'+
+          '<div>Target: <b style="color:#ffc107">+$'+G.lab.targetProfit+'</b></div>'+
+          '<div>Net: <b style="color:'+(G.lab.sessionNet>=0?'#2ecc71':'#e74c3c')+'">'+(G.lab.sessionNet>=0?'+':'')+G.lab.sessionNet+'</b></div>'+
+          '<div>Numbers left: <b>'+seq.length+' of '+orig.length+'</b></div>'+
+          '<div>Hands: <b>'+G.lab.history.length+'</b></div>'+
+        '</div>'+
+        '<div class="lab-seq-row">'+labSeqHTML(seq,true)+'</div>'+
+        '<div class="lab-progress"><div class="lab-progress-fill" style="width:'+Math.max(2,Math.round(100*(orig.length-seq.length)/orig.length))+'%"></div></div>'+
+        '<div class="lab-bet-line">Next bet: <b style="color:#ffc107">$'+lb+'</b>  <span style="color:#6688aa">('+seqLabel+' × $'+G.lab.unitValue+'/unit)</span></div>'+
+        (histH?'<div style="margin-top:10px;border-top:1px solid #1a3060;padding-top:8px">'+histH+'</div>':'')+
+        '</div>'+
+        (insufficient?'<div style="color:#e74c3c;font-size:12px;margin-bottom:8px;">⚠ Required bet ($'+lb+') exceeds bankroll. <button onclick="labReset()" style="background:none;border:none;color:#cc99ff;cursor:pointer;font-family:inherit;text-decoration:underline">End sequence</button></div>':'')+
+        '<button class="btn btn-deal" onclick="pDeal()" '+(lb<=0||lb>G.br?'disabled':'')+'>Deal — Labouchère $'+lb+'</button>';
+      G.bet=Math.min(lb,G.br);
+    }else if(G.labShow){
+      ctrlH='<div class="lab-setup-panel">'+
+        '<div class="lab-title"><span>🎯 Set up Labouchère</span><button onclick="G.labShow=false;render()" style="background:none;border:none;color:#6688aa;cursor:pointer;font-family:inherit">← cancel</button></div>'+
+        '<div style="font-size:12px;color:#6688aa;margin-bottom:10px">Enter your sequence of numbers (space or comma separated). Bet = first + last. Win → cancel those two. Lose → add bet to end.</div>'+
+        '<div style="margin-bottom:10px">'+
+          '<div style="font-size:12px;color:#8899bb;margin-bottom:5px">Sequence</div>'+
+          '<input id="lab-seq-inp" class="lab-input" style="width:100%;margin-bottom:8px" placeholder="e.g.  1 2 3 4 5" oninput="labPreview()">'+
+        '</div>'+
+        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'+
+          '<div><div style="font-size:12px;color:#8899bb;margin-bottom:5px">Unit value ($)</div><input id="lab-uv-inp" class="lab-input" style="width:90px" type="number" min="1" value="5" oninput="labPreview()"></div>'+
+          '<div style="font-size:12px;color:#6688aa;flex:1;padding-top:18px"><span id="lab-preview">Enter a sequence above</span></div>'+
+        '</div>'+
+        '<div style="margin-bottom:10px">'+
+          '<div style="font-size:12px;color:#8899bb;margin-bottom:6px">Presets</div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+            ['1 2 3','1 2 3 4 5','1 1 2 3 5 8','2 2 2 2 2'].map(function(p){
+              return '<button onclick="document.getElementById(\'lab-seq-inp\').value=\''+p+'\';labPreview();" style="background:#0f2040;border:1px solid #1a5090;border-radius:6px;color:#a0c4ff;padding:6px 10px;font-size:12px;cursor:pointer;font-family:inherit">'+p+'</button>';
+            }).join('')+
+          '</div>'+
+        '</div>'+
+        '<button class="btn btn-deal" onclick="labInit(document.getElementById(\'lab-seq-inp\').value,document.getElementById(\'lab-uv-inp\').value)">Start sequence</button>'+
+        '</div>'+
+        normalBetBlock();
     }else{
-      var chips=[5,10,25,50,100].filter(function(v){return v<=G.br;});
-      ctrlH='<div class="controls-label">Place your bet — tap chips to add</div>'+
-        '<div class="chip-row">'+
-          chips.map(function(v){
-            return '<div class="chip chip-'+v+'" onclick="G.bet=Math.min(G.bet+'+v+',G.br);render()">+$'+v+'</div>';
-          }).join('')+
-        '</div>'+
-        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">'+
-          '<span style="color:#8888aa;font-size:13px;font-weight:600">Bet:</span>'+
-          '<input class="bet-input" type="number" min="0" max="'+G.br+'" value="'+G.bet+'" oninput="G.bet=Math.max(0,Math.min(parseInt(this.value)||0,'+G.br+'));render()">'+
-          '<button class="btn btn-action" onclick="G.bet=0;render()" style="padding:9px 14px;font-size:13px" '+(G.bet===0?'disabled':'')+'>Clear bet</button>'+
-          '<button class="btn btn-action" onclick="resetBankroll()" style="padding:9px 14px;font-size:13px;border-color:#553399;color:#cc99ff">Reset $1k</button>'+
-        '</div>'+
-        '<button class="btn btn-deal" onclick="pDeal()" '+(G.bet<=0||G.bet>G.br?'disabled':'')+'>Deal — bet $'+G.bet+'</button>';
+      ctrlH=normalBetBlock()+
+        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #0f3460">'+
+          '<button onclick="G.labShow=true;render()" style="background:none;border:none;color:#8888aa;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">🎯 Set up Labouchère betting system</button>'+
+        '</div>';
     }
   }
   if(G.pp==='player'){
@@ -535,7 +680,36 @@ function render(){
     }else{
       sumH='<div style="color:#6688aa;font-size:13px;font-style:italic;margin-bottom:8px">No decisions — automatic result</div>';
     }
-    ctrlH=resH+sumH+
+    var labUpdH='';
+    if(G.lab&&G.lab.active&&G.lab.history.length>0){
+      var lh=G.lab.history[0];
+      var changeMsg=lh.result==='win'?
+        'Won — cancelled <b style="color:#ffc107">'+lh.seqBefore[0]+(lh.seqBefore.length>1?' and '+lh.seqBefore[lh.seqBefore.length-1]:'')+'</b> from sequence':
+        lh.result==='loss'?'Lost — added <b style="color:#e74c3c">'+(lh.lossUnits||lh.betAmt/G.lab.unitValue)+'</b> unit'+(lh.lossUnits!==1?'s':'')+' to sequence':
+        'Push — sequence unchanged';
+      var remaining=G.lab.seq.length;
+      labUpdH='<div class="lab-update">'+
+        '<div class="lab-title">🎯 Labouchère update</div>'+
+        '<div style="font-size:13px;color:#c0d0e0;margin-bottom:8px">'+changeMsg+'</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+
+          '<div style="font-size:11px;color:#6688aa">Before:</div>'+
+          '<div class="lab-seq-row" style="margin:0">'+labSeqHTML(lh.seqBefore,false)+'</div>'+
+        '</div>'+
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
+          '<div style="font-size:11px;color:#6688aa">After:</div>'+
+          '<div class="lab-seq-row" style="margin:0">'+(G.lab.complete?'<span style="color:#27ae60;font-weight:700;font-size:13px">Complete! 🎯</span>':labSeqHTML(G.lab.seq,false))+'</div>'+
+        '</div>'+
+        '<div class="lab-stat-row">'+
+          '<div>Session net: <b style="color:'+(G.lab.sessionNet>=0?'#2ecc71':'#e74c3c')+'">'+(G.lab.sessionNet>=0?'+':'')+G.lab.sessionNet+'</b></div>'+
+          '<div>Target: <b style="color:#ffc107">+$'+G.lab.targetProfit+'</b></div>'+
+          '<div>Progress: <b>'+(G.lab.original.length-remaining)+'/'+G.lab.original.length+' cancelled</b></div>'+
+        '</div>'+
+        (G.lab.complete?'':
+          '<div class="lab-progress"><div class="lab-progress-fill" style="width:'+Math.max(2,Math.round(100*(G.lab.original.length-remaining)/G.lab.original.length))+'%"></div></div>'+
+          '<div style="font-size:12px;color:#8888aa;margin-top:4px">Next bet: <b style="color:#ffc107">$'+labBet()+'</b></div>')+
+        '</div>';
+    }
+    ctrlH=resH+sumH+labUpdH+
       '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">'+
         '<button class="btn btn-next" onclick="pNew()">Next hand →</button>'+
         '<span style="font-size:12px;color:#6688aa">Running BS gap: <span style="font-weight:700;color:'+(bsDiff>0?'#e74c3c':bsDiff<0?'#2ecc71':'#6688aa')+'">'+(bsDiff>=0?'+':'')+bsDiff+'</span></span>'+
