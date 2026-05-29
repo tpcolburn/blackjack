@@ -257,7 +257,8 @@ var G = {
   curDecs:[], handBsNet:null, preDealBr:1000, savedHand:null, handDecs:[],
   gs:{hands:0,totalDecs:0,correctDecs:0,bsBr:1000,history:[],
       catStats:{hard:{ok:0,n:0},soft:{ok:0,n:0},pair:{ok:0,n:0}}},
-  lab:null, labShow:false
+  lab:null, labShow:false,
+  og:null, ogShow:false
 };
 
 function setG(patch){for(var k in patch)G[k]=patch[k]; render();}
@@ -289,6 +290,7 @@ function finalizeStats(actualNet,decs,newBrVal){
   var rec={num:gs.hands+1,bet:sv?sv.bet:0,actualNet:actualNet,bsNet:bsNet,actualBrAfter:newBrVal,bsBrAfter:newBsBr,decs:decs.slice()};
   G.gs={hands:gs.hands+1,totalDecs:gs.totalDecs+decs.length,correctDecs:gs.correctDecs+decs.filter(function(d){return d.correct;}).length,bsBr:newBsBr,history:gs.history.concat([rec]).slice(-100),catStats:newCat};
   labUpdate(actualNet);
+  ogUpdate(actualNet);
 }
 
 function pDeal(){
@@ -367,6 +369,8 @@ function pNew(){
   G.pp='bet';G.oc=null;G.pH=[[]];G.dH=[];G.aH=0;G.hint=null;G.curDecs=[];G.handBsNet=null;
   if(G.lab&&G.lab.active&&!G.lab.complete){
     G.bet=Math.min(labBet(),G.br);
+  }else if(G.og&&G.og.active){
+    G.bet=Math.min(ogBet(),G.br);
   }else{
     var prev=(G.savedHand&&G.savedHand.bet)||G.bet||0;
     G.bet=Math.min(prev,G.br);
@@ -375,7 +379,7 @@ function pNew(){
 }
 
 function resetBankroll(){
-  G.br=1000; G.bet=0; G.lab=null; G.labShow=false; render();
+  G.br=1000; G.bet=0; G.lab=null; G.labShow=false; G.og=null; G.ogShow=false; render();
 }
 
 function toggleHint(){
@@ -404,6 +408,7 @@ function labInit(seqStr,unitVal){
   var uv=Math.max(1,parseFloat(unitVal)||5);
   var target=nums.reduce(function(a,b){return a+b;},0)*uv;
   G.lab={active:true,original:nums.slice(),seq:nums.slice(),unitValue:uv,history:[],targetProfit:target,sessionNet:0,complete:false};
+  G.og=null; G.ogShow=false;
   G.labShow=false;
   G.bet=Math.min(labBet(),G.br);
   render();
@@ -450,6 +455,66 @@ function labPreview(){
   var sum=nums.reduce(function(a,b){return a+b;},0);
   var firstBet=(nums.length===1?nums[0]:(nums[0]+nums[nums.length-1]))*unitVal;
   prev.innerHTML='Target profit: <b style="color:#ffc107">+$'+(sum*unitVal)+'</b> &nbsp;·&nbsp; '+nums.length+' numbers &nbsp;·&nbsp; First bet: <b style="color:#a0c4ff">$'+firstBet+'</b>';
+}
+
+// ── OSCAR'S GRIND ──────────────────────────────────────────────
+function ogBet(){
+  if(!G.og||!G.og.active)return 0;
+  var target=G.og.targetUnits*G.og.unitValue;
+  var needed=target-G.og.seriesNet;
+  if(needed<=0)return G.og.unitValue;
+  var normal=G.og.currentBetUnits*G.og.unitValue;
+  return Math.max(G.og.unitValue,Math.min(normal,needed));
+}
+
+function ogInit(unitVal,targetUnits){
+  var uv=Math.max(1,parseFloat(unitVal)||5);
+  var tu=Math.max(1,parseInt(targetUnits)||1);
+  G.og={active:true,unitValue:uv,targetUnits:tu,currentBetUnits:1,seriesNet:0,sessionNet:0,seriesCount:0,history:[]};
+  G.lab=null; G.labShow=false;
+  G.ogShow=false;
+  G.bet=Math.min(ogBet(),G.br);
+  render();
+}
+
+function ogReset(){
+  G.og=null; G.ogShow=false; G.bet=0; render();
+}
+
+function ogUpdate(actualNet){
+  if(!G.og||!G.og.active)return;
+  var betBefore=ogBet();
+  var unitsBefore=G.og.currentBetUnits;
+  G.og.sessionNet+=actualNet;
+  G.og.seriesNet+=actualNet;
+  var target=G.og.targetUnits*G.og.unitValue;
+  var change='',seriesCompleted=false;
+  if(G.og.seriesNet>=target){
+    seriesCompleted=true;
+    G.og.seriesCount+=1;
+    G.og.currentBetUnits=1;
+    G.og.seriesNet=0;
+    change='Series complete (+'+G.og.targetUnits+' unit'+(G.og.targetUnits!==1?'s':'')+') — reset bet to 1 unit';
+  }else if(actualNet>0){
+    G.og.currentBetUnits+=1;
+    change='Won — bet up to '+G.og.currentBetUnits+' units';
+  }else if(actualNet<0){
+    change='Lost — bet stays at '+G.og.currentBetUnits+' unit'+(G.og.currentBetUnits!==1?'s':'');
+  }else{
+    change='Push — no change';
+  }
+  G.og.history.unshift({actualNet:actualNet,betAmt:betBefore,unitsBefore:unitsBefore,unitsAfter:G.og.currentBetUnits,seriesCompleted:seriesCompleted,change:change,seriesNetAfter:G.og.seriesNet,seriesCountAfter:G.og.seriesCount});
+  if(G.og.history.length>30)G.og.history.pop();
+}
+
+function ogPreview(){
+  var uv=document.getElementById('og-uv-inp');
+  var tu=document.getElementById('og-tu-inp');
+  var prev=document.getElementById('og-preview');
+  if(!prev)return;
+  var unitVal=Math.max(1,parseFloat((uv&&uv.value)||5)||5);
+  var targetUnits=Math.max(1,parseInt((tu&&tu.value)||1)||1);
+  prev.innerHTML='First bet: <b style="color:#a0c4ff">$'+unitVal+'</b> &nbsp;·&nbsp; Target: <b style="color:#5cd6c0">+$'+(unitVal*targetUnits)+'</b> per series';
 }
 
 // ── MONTE CARLO SIM (empirical outcome dist from 1M-hand offline run) ──
@@ -731,10 +796,45 @@ function render(){
         '</div>'+
         '</div>'+
         normalBetBlock();
+    }else if(G.og&&G.og.active){
+      var ob=ogBet(),target=G.og.targetUnits*G.og.unitValue;
+      var insufficientOg=ob>G.br;
+      var ogHistH=G.og.history.slice(0,5).map(function(h){
+        var arr=h.actualNet>0?'✓ +$'+h.actualNet:h.actualNet<0?'✗ -$'+Math.abs(h.actualNet):'~ push';
+        return '<div class="lab-hist-row"><span style="color:'+(h.actualNet>0?'#27ae60':h.actualNet<0?'#e74c3c':'#8888aa')+'">'+arr+'</span> <span style="color:#4466aa">— '+h.change+'</span></div>';
+      }).join('');
+      ctrlH='<div class="lab-panel" style="border-color:#1e5a55">'+
+        '<div class="lab-title"><span style="color:#5cd6c0">🎲 Oscar\'s Grind</span><button onclick="ogReset()" style="background:none;border:none;color:#553366;font-size:12px;cursor:pointer;font-family:inherit">End grind</button></div>'+
+        '<div class="lab-stat-row">'+
+          '<div>Target: <b style="color:#5cd6c0">+$'+target+'</b>/series</div>'+
+          '<div>Series net: <b style="color:'+(G.og.seriesNet>=0?'#2ecc71':'#e74c3c')+'">'+(G.og.seriesNet>=0?'+':'')+G.og.seriesNet+'</b></div>'+
+          '<div>Session: <b style="color:'+(G.og.sessionNet>=0?'#2ecc71':'#e74c3c')+'">'+(G.og.sessionNet>=0?'+':'')+G.og.sessionNet+'</b></div>'+
+          '<div>Series done: <b>'+G.og.seriesCount+'</b></div>'+
+        '</div>'+
+        '<div class="lab-progress"><div class="lab-progress-fill" style="background:#5cd6c0;width:'+Math.max(2,Math.min(100,Math.round(100*Math.max(0,G.og.seriesNet)/target)))+'%"></div></div>'+
+        '<div class="lab-bet-line">Next bet: <b style="color:#5cd6c0">$'+ob+'</b>  <span style="color:#6688aa">('+G.og.currentBetUnits+' unit'+(G.og.currentBetUnits!==1?'s':'')+' × $'+G.og.unitValue+', capped at +'+G.og.targetUnits+' target)</span></div>'+
+        (ogHistH?'<div style="margin-top:10px;border-top:1px solid #1a3060;padding-top:8px">'+ogHistH+'</div>':'')+
+        '</div>'+
+        (insufficientOg?'<div style="color:#e74c3c;font-size:12px;margin-bottom:8px;">⚠ Required bet ($'+ob+') exceeds bankroll. <button onclick="ogReset()" style="background:none;border:none;color:#cc99ff;cursor:pointer;font-family:inherit;text-decoration:underline">End grind</button></div>':'')+
+        '<button class="btn btn-deal" onclick="pDeal()" '+(ob<=0||ob>G.br?'disabled':'')+'>Deal — Oscar\'s $'+ob+'</button>';
+      G.bet=Math.min(ob,G.br);
+    }else if(G.ogShow){
+      ctrlH='<div class="lab-setup-panel" style="border-color:#1e5a55">'+
+        '<div class="lab-title"><span style="color:#5cd6c0">🎲 Set up Oscar\'s Grind</span><button onclick="G.ogShow=false;render()" style="background:none;border:none;color:#6688aa;cursor:pointer;font-family:inherit">← cancel</button></div>'+
+        '<div style="font-size:12px;color:#6688aa;margin-bottom:10px">Goal: net <b>+target units</b> per series, then reset. Bet stays after a loss; goes up 1 unit after a win; capped so you never overshoot the target.</div>'+
+        '<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap">'+
+          '<div><div style="font-size:12px;color:#8899bb;margin-bottom:5px">Unit value ($)</div><input id="og-uv-inp" class="lab-input" style="width:100px" type="number" min="1" value="5" oninput="ogPreview()"></div>'+
+          '<div><div style="font-size:12px;color:#8899bb;margin-bottom:5px">Target per series (units)</div><input id="og-tu-inp" class="lab-input" style="width:100px" type="number" min="1" value="1" oninput="ogPreview()"></div>'+
+          '<div style="font-size:12px;color:#6688aa;flex:1;padding-top:18px;min-width:200px"><span id="og-preview">First bet: <b style="color:#a0c4ff">$5</b> &nbsp;·&nbsp; Target: <b style="color:#5cd6c0">+$5</b> per series</span></div>'+
+        '</div>'+
+        '<button class="btn btn-deal" onclick="ogInit(document.getElementById(\'og-uv-inp\').value,document.getElementById(\'og-tu-inp\').value)">Start grind</button>'+
+        '</div>'+
+        normalBetBlock();
     }else{
       ctrlH=normalBetBlock()+
-        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #0f3460">'+
-          '<button onclick="G.labShow=true;render()" style="background:none;border:none;color:#8888aa;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">🎯 Set up Labouchère betting system</button>'+
+        '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #0f3460;display:flex;gap:14px;flex-wrap:wrap">'+
+          '<button onclick="G.labShow=true;render()" style="background:none;border:none;color:#8888aa;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">🎯 Set up Labouchère</button>'+
+          '<button onclick="G.ogShow=true;render()" style="background:none;border:none;color:#8888aa;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">🎲 Set up Oscar\'s Grind</button>'+
         '</div>';
     }
   }
@@ -802,7 +902,24 @@ function render(){
           '<div style="font-size:12px;color:#8888aa;margin-top:4px">Next bet: <b style="color:#ffc107">$'+labBet()+'</b></div>')+
         '</div>';
     }
-    ctrlH=resH+sumH+labUpdH+
+    var ogUpdH='';
+    if(G.og&&G.og.active&&G.og.history.length>0){
+      var oh=G.og.history[0];
+      var ogTarget=G.og.targetUnits*G.og.unitValue;
+      var progress=Math.max(0,Math.min(100,Math.round(100*Math.max(0,G.og.seriesNet)/ogTarget)));
+      ogUpdH='<div class="lab-update" style="border-color:#1e5a55">'+
+        '<div class="lab-title"><span style="color:#5cd6c0">🎲 Oscar\'s update</span></div>'+
+        '<div style="font-size:13px;color:#c0d0e0;margin-bottom:8px">'+oh.change+'</div>'+
+        '<div class="lab-stat-row">'+
+          '<div>Series net: <b style="color:'+(G.og.seriesNet>=0?'#2ecc71':'#e74c3c')+'">'+(G.og.seriesNet>=0?'+':'')+G.og.seriesNet+'</b>'+(oh.seriesCompleted?'':' / +$'+ogTarget)+'</div>'+
+          '<div>Session: <b style="color:'+(G.og.sessionNet>=0?'#2ecc71':'#e74c3c')+'">'+(G.og.sessionNet>=0?'+':'')+G.og.sessionNet+'</b></div>'+
+          '<div>Series done: <b>'+G.og.seriesCount+'</b></div>'+
+        '</div>'+
+        (oh.seriesCompleted?'':'<div class="lab-progress"><div class="lab-progress-fill" style="background:#5cd6c0;width:'+progress+'%"></div></div>')+
+        '<div style="font-size:12px;color:#8888aa;margin-top:4px">Next bet: <b style="color:#5cd6c0">$'+ogBet()+'</b></div>'+
+        '</div>';
+    }
+    ctrlH=resH+sumH+labUpdH+ogUpdH+
       '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">'+
         '<button class="btn btn-next" onclick="pNew()">Next hand →</button>'+
         '<span style="font-size:12px;color:#6688aa">Running BS gap: <span style="font-weight:700;color:'+(bsDiff>0?'#e74c3c':bsDiff<0?'#2ecc71':'#6688aa')+'">'+(bsDiff>=0?'+':'')+bsDiff+'</span></span>'+
