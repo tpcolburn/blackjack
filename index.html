@@ -126,6 +126,19 @@ html { height: -webkit-fill-available; }
 .lab-update { background: #080f20; border: 1.5px solid #1a3060; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
 .lab-progress { height: 6px; border-radius: 3px; background: #1a3060; overflow: hidden; margin: 6px 0; }
 .lab-progress-fill { height: 100%; border-radius: 3px; background: #ffc107; transition: width .3s; }
+/* card counting */
+.ctag { position: absolute; bottom: 1px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: 800; line-height: 1; padding: 1px 4px; border-radius: 7px; border: 1px solid; }
+.ctag-plus { color: #1e8449; background: rgba(39,174,96,0.18); border-color: rgba(39,174,96,0.45); }
+.ctag-minus { color: #c0392b; background: rgba(231,76,60,0.16); border-color: rgba(231,76,60,0.4); }
+.ctag-zero { color: #7a7a92; background: rgba(120,120,140,0.14); border-color: rgba(120,120,140,0.35); }
+.cc-hud { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: linear-gradient(180deg,#0d2f2b,#0a2320); border: 1.5px solid #1e5a55; border-radius: 11px; padding: 9px 13px; margin-bottom: 12px; }
+.cc-hud .cc-cell { display: flex; flex-direction: column; line-height: 1.15; }
+.cc-hud .cc-k { font-size: 9px; font-weight: 700; color: #5a9c93; text-transform: uppercase; letter-spacing: 0.8px; }
+.cc-hud .cc-v { font-size: 17px; font-weight: 800; color: #d7efe9; }
+.cc-hud .cc-sep { width: 1px; align-self: stretch; background: #1e5a55; }
+.cc-pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 12px; }
+.cc-ok { color: #2ecc71; background: rgba(39,174,96,0.16); }
+.cc-bad { color: #e74c3c; background: rgba(231,76,60,0.16); }
 </style>
 </head>
 <body>
@@ -265,14 +278,15 @@ var G = {
   gs:{hands:0,totalDecs:0,correctDecs:0,bsBr:1000,history:[],
       catStats:{hard:{ok:0,n:0},soft:{ok:0,n:0},pair:{ok:0,n:0}}},
   lab:null, labShow:false,
-  og:null, ogShow:false
+  og:null, ogShow:false,
+  cc:null
 };
 
 function setG(patch){for(var k in patch)G[k]=patch[k]; render();}
 
 // ── PERSISTENCE ────────────────────────────────────────────────
 function saveState(){
-  try{localStorage.setItem('bj_state',JSON.stringify({br:G.br,gs:G.gs,lab:G.lab,og:G.og}));}catch(e){}
+  try{localStorage.setItem('bj_state',JSON.stringify({br:G.br,gs:G.gs,lab:G.lab,og:G.og,cc:G.cc}));}catch(e){}
 }
 function loadState(){
   try{
@@ -282,7 +296,49 @@ function loadState(){
     if(s.gs&&s.gs.catStats)G.gs=s.gs;
     if(s.lab)G.lab=s.lab;
     if(s.og)G.og=s.og;
+    if(s.cc)G.cc=s.cc;
   }catch(e){}
+}
+
+// ── CARD COUNTING (Hi-Lo) ──────────────────────────────────────
+function hiloTag(v){
+  if(v==='A'||v==='10'||v==='J'||v==='Q'||v==='K')return -1;
+  var n=parseInt(v); // 2..9
+  return (n>=2&&n<=6)?1:0; // 7,8,9 = 0
+}
+// Count every revealed card once (deduped by unique id); call as cards become face-up
+function ccReveal(cards){
+  if(!G.cc||!G.cc.active)return;
+  for(var i=0;i<cards.length;i++){var c=cards[i]; if(c&&!G.cc.counted[c.id]){G.cc.counted[c.id]=1; G.cc.run+=hiloTag(c.v);}}
+}
+function ccDecksLeft(si){var d=(312-si)/52; return d<0.25?0.25:d;} // floor at quarter-deck to avoid blow-up
+// True count, floored toward zero (conservative convention)
+function ccTrueCount(run,si){var raw=run/ccDecksLeft(si); return raw<0?Math.ceil(raw):Math.floor(raw);}
+// Bet ramp: 1-8 spread keyed to true count (units)
+function ccRampUnits(tc){ if(tc<=1)return 1; if(tc===2)return 2; if(tc===3)return 4; if(tc===4)return 6; return 8; }
+function ccUnit(){return (G.cc&&G.cc.unit)||10;}
+function ccEnable(){
+  G.lab=null; G.labShow=false; G.og=null; G.ogShow=false;
+  G.cc={active:true,run:0,counted:{},wheels:true,unit:10,
+        rcChecks:0,rcOk:0,tcChecks:0,tcOk:0,betRounds:0,betOk:0,
+        quiz:null,lastBet:null};
+  G.bet=Math.min(ccUnit(),G.br);
+  render();
+}
+function ccEnd(){G.cc=null;G.bet=0;render();}
+function ccToggleWheels(){if(G.cc){G.cc.wheels=!G.cc.wheels;G.cc.quiz=null;}render();}
+function ccSetUnit(v){if(!G.cc)return;G.cc.unit=Math.max(1,parseInt(v)||10);
+  var hint=document.getElementById('cc-unit-hint'); if(hint)hint.textContent='$'+G.cc.unit+'/unit';}
+function ccSubmitQuiz(){
+  if(!G.cc||!G.cc.quiz)return;
+  var rc=parseInt((document.getElementById('cc-rc-inp')||{}).value);
+  var tc=parseInt((document.getElementById('cc-tc-inp')||{}).value);
+  var correctRC=G.cc.run, correctTC=ccTrueCount(G.cc.run,G.si);
+  var rcOk=(rc===correctRC), tcOk=(tc===correctTC);
+  G.cc.rcChecks++; if(rcOk)G.cc.rcOk++;
+  G.cc.tcChecks++; if(tcOk)G.cc.tcOk++;
+  G.cc.quiz={done:true,yourRC:isNaN(rc)?'—':rc,yourTC:isNaN(tc)?'—':tc,correctRC:correctRC,correctTC:correctTC,rcOk:rcOk,tcOk:tcOk};
+  render();
 }
 
 // ── LOGIC ──────────────────────────────────────────────────────
@@ -319,10 +375,17 @@ function pDeal(){
   var bet=G.bet,br=G.br;
   if(bet<=0||bet>br)return;
   // Cut card: if we passed it on a prior round, reshuffle now — between rounds, never mid-hand
-  if(G.si>=G.shoe.length-60){G.shoe=mkShoe();G.si=0;}
+  if(G.si>=G.shoe.length-60){G.shoe=mkShoe();G.si=0; if(G.cc&&G.cc.active){G.cc.run=0;G.cc.counted={};}}
+  // Card-counting: grade the bet ramp against the true count going into this round
+  if(G.cc&&G.cc.active){
+    var _tc=ccTrueCount(G.cc.run,G.si),_rec=ccRampUnits(_tc),_yu=Math.round(bet/ccUnit());
+    var _ok=_yu===_rec; G.cc.betRounds++; if(_ok)G.cc.betOk++;
+    G.cc.lastBet={tc:_tc,rec:_rec,recDollars:_rec*ccUnit(),your:bet,yourUnits:_yu,ok:_ok};
+  }
   var s=G.shoe,i=G.si;
   function d(){var r=doDraw(s,i);s=r.ns;i=r.ni;return r.c;}
   var ph=[d(),d()],dh=[d(),d()];
+  ccReveal([ph[0],ph[1],dh[0]]); // hole card (dh[1]) stays uncounted until revealed
   var nb=br-bet;
   var saved={shoe:s,si:i,playerHand:ph,dealerHand:dh,bet:bet};
   G.shoe=s;G.si=i;G.preDealBr=br;G.savedHand=saved;G.handDecs=[];G.curDecs=[];
@@ -331,6 +394,7 @@ function pDeal(){
   else if(isBJ(ph)){var w=Math.round(bet*1.5);G.br=nb+bet+w;G.oc=[{r:'win',pay:bet+w,label:'Blackjack! Won $'+w+'!'}];G.pp='done';finalizeStats(w,[],nb+bet+w);}
   else if(isBJ(dh)){G.oc=[{r:'loss',pay:0,label:'Dealer blackjack — lost $'+bet}];G.pp='done';finalizeStats(-bet,[],nb);}
   else G.pp='player';
+  if(G.pp==='done')ccReveal([dh[1]]); // a natural ended the round → hole card is exposed
   render();
 }
 
@@ -340,6 +404,7 @@ function advance(hands,bets,splits,next,dh,s,i,curBr){
   var df=dh.slice(),ns=s,ni=i;
   while(tot(df)<17||(isSoft(df)&&tot(df)===17)){var r=doDraw(ns,ni);df.push(r.c);ns=r.ns;ni=r.ni;}
   G.shoe=ns;G.si=ni;G.dH=df;
+  ccReveal(df); // dealer reveals hole card + draws — count them all
   var res=resolveHands(hands,df,bets,splits);
   var payout=res.reduce(function(s,o){return s+o.pay;},0);
   var newBr=curBr+payout;
@@ -352,7 +417,7 @@ function pHit(){
   var hand=G.pH[G.aH],aH=G.aH,dH=G.dH,pB=G.pB,splt=G.splt,br=G.br;
   recDec(hand,dH[0],'hit',hand.length===2&&br>=pB[aH],hand.length===2&&isPair(hand)&&br>=pB[aH]&&G.pH.length<3);
   var s=G.shoe,i=G.si,r=doDraw(s,i);s=r.ns;i=r.ni;
-  G.shoe=s;G.si=i;G.hint=null;
+  G.shoe=s;G.si=i;G.hint=null;ccReveal([r.c]);
   var nh=G.pH.slice();nh[aH]=nh[aH].concat([r.c]);G.pH=nh;
   if(tot(nh[aH])>=21)advance(nh,pB,splt,aH+1,dH,s,i,br);
   else render();
@@ -371,7 +436,7 @@ function pDouble(){
   var nh=G.pH.slice();nh[aH]=nh[aH].concat([r.c]);
   var ex=pB[aH];pB[aH]*=2;
   var nb=br-ex;
-  G.shoe=s;G.si=i;G.hint=null;G.pH=nh;G.pB=pB;G.br=nb;
+  G.shoe=s;G.si=i;G.hint=null;G.pH=nh;G.pB=pB;G.br=nb;ccReveal([r.c]);
   advance(nh,pB,splt,aH+1,dH,s,i,nb);
 }
 
@@ -381,6 +446,7 @@ function pSplit(){
   var s=G.shoe,i=G.si;
   function dr(){var r=doDraw(s,i);s=r.ns;i=r.ni;return r.c;}
   var h0=[hand[0],dr()],h1=[hand[1],dr()];
+  ccReveal([h0[1],h1[1]]);
   var nh=G.pH.slice();nh.splice(aH,1,h0,h1);
   var ob=pB[aH];pB.splice(aH,1,ob,ob);
   splt.splice(aH,1,true,true);
@@ -395,6 +461,11 @@ function pNew(){
     G.bet=Math.min(labBet(),G.br);
   }else if(G.og&&G.og.active){
     G.bet=Math.min(ogBet(),G.br);
+  }else if(G.cc&&G.cc.active){
+    var prevc=(G.savedHand&&G.savedHand.bet)||G.bet||0;
+    G.bet=Math.min(prevc,G.br); // you choose the bet — that's the ramp drill
+    var endShoe=G.si>=G.shoe.length-60;
+    G.cc.quiz=(!G.cc.wheels&&(endShoe||Math.random()<0.15))?{done:false}:null;
   }else{
     var prev=(G.savedHand&&G.savedHand.bet)||G.bet||0;
     G.bet=Math.min(prev,G.br);
@@ -648,10 +719,13 @@ function cardHTML(card,hidden){
   if(!card)return '';
   var isRed=RED_S.has(card.s);
   var idx='<span class="rk">'+card.v+'</span><span class="su">'+card.s+'</span>';
+  var tagH='';
+  if(G.cc&&G.cc.active&&G.cc.wheels){var t=hiloTag(card.v); tagH='<div class="ctag '+(t>0?'ctag-plus':t<0?'ctag-minus':'ctag-zero')+'">'+(t>0?'+1':t<0?'−1':'0')+'</div>';}
   return '<div class="card card-face '+(isRed?'red':'black')+'">'+
     '<div class="corner tl">'+idx+'</div>'+
     '<div class="pip">'+card.s+'</div>'+
     '<div class="corner br">'+idx+'</div>'+
+    tagH+
     '</div>';
 }
 function decHTML(dec){
@@ -708,6 +782,16 @@ function render(){
       var label={hard:'Hard totals',soft:'Soft totals (Ace + X)',pair:'Pairs'}[cat];
       return '<div class="cat-top"><span style="color:#a0b8d0;font-size:13px">'+label+'</span><span style="font-weight:700;font-size:13px;color:'+(cs.n?col:'#4466aa')+'">'+(cs.n?p+'%  ('+cs.ok+'/'+cs.n+')':'No data yet')+'</span></div><div class="pbar"><div class="pbar-fill" style="width:'+p+'%;background:'+col+'"></div></div>';
     }).join('');
+    var ccStatsH='';
+    if(G.cc&&(G.cc.betRounds>0||G.cc.rcChecks>0)){
+      var ccRow=function(label,ok,n){var p=n?Math.round(100*ok/n):null;var col=p===null?'#4466aa':p>=85?'#27ae60':p>=65?'#e67e22':'#e74c3c';
+        return '<div class="cat-top"><span style="color:#a0b8d0;font-size:13px">'+label+'</span><span style="font-weight:700;font-size:13px;color:'+col+'">'+(p!==null?p+'%  ('+ok+'/'+n+')':'No data')+'</span></div><div class="pbar"><div class="pbar-fill" style="width:'+(p||0)+'%;background:'+col+'"></div></div>';};
+      ccStatsH='<div class="section"><h3>🃏 Card counting (Hi-Lo)</h3>'+
+        ccRow('Running-count checks',G.cc.rcOk,G.cc.rcChecks)+
+        ccRow('True-count checks',G.cc.tcOk,G.cc.tcChecks)+
+        ccRow('Bet-ramp adherence',G.cc.betOk,G.cc.betRounds)+
+        '</div>';
+    }
     el.innerHTML='<div class="stats-page"><div class="stats-hdr"><button class="back-link" onclick="G.screen=\'game\';render()">← back</button><h2 style="font-size:18px;font-weight:700;color:#e0e0e0">Performance Stats</h2></div>'+
       '<div class="stat-cards">'+
         '<div class="stat-card"><div class="sc-label">Your bankroll</div><div class="sc-val '+(G.br>=1000?'c-green':'c-red')+'">$'+G.br.toLocaleString()+'</div><div class="sc-sub">'+(G.br-1000>=0?'+':'')+' $'+(G.br-1000)+' vs start</div></div>'+
@@ -718,6 +802,7 @@ function render(){
         (bsDiff>0?'📉':'📈')+' Perfect basic strategy would have '+(bsDiff>0?'netted $'+bsDiff+' more':'saved you $'+Math.abs(bsDiff))+' over '+G.gs.hands+' hands</div>':'')+
       '<div class="section"><h3>Bankroll over time</h3>'+chartHTML(G.gs.history,1000)+'<div style="font-size:11px;color:#4466aa;margin-top:6px;text-align:center">Solid blue = your actual &nbsp;·&nbsp; Dashed green = perfect basic strategy</div></div>'+
       '<div class="section"><h3>Accuracy by hand type</h3>'+catHTML+'</div>'+
+      ccStatsH+
       (G.gs.history.length?'<div class="section"><h3>Recent hands</h3>'+histHTML+'</div>':'')+
       '<button class="reset-link" onclick="if(confirm(\'Reset all stats and bankroll to $1,000?\')){G.br=1000;G.gs={hands:0,totalDecs:0,correctDecs:0,bsBr:1000,history:[],catStats:{hard:{ok:0,n:0},soft:{ok:0,n:0},pair:{ok:0,n:0}}};G.screen=\'game\';render();}">Reset all stats</button>'+
       '</div>';
@@ -725,8 +810,10 @@ function render(){
   }
 
   // Game screen
-  var dLabel=G.dH.length?' — '+(G.pp==='done'?(tot(G.dH)>21?tot(G.dH)+' bust':isBJ(G.dH)?'Blackjack':tot(G.dH)):'shows '+(G.dH[0]?G.dH[0].v:'?')):'';
-  var dealerCardsH=G.dH.map(function(c,i){return cardHTML(c,G.pp==='player'&&i===1);}).join('');
+  var surr=G.pp==='done'&&G.oc&&G.oc[0]&&G.oc[0].r==='surrender';
+  var dShow=G.pp==='done'&&!surr; // hole stays hidden on surrender — dealer never played it
+  var dLabel=G.dH.length?' — '+(dShow?(tot(G.dH)>21?tot(G.dH)+' bust':isBJ(G.dH)?'Blackjack':tot(G.dH)):'shows '+(G.dH[0]?G.dH[0].v:'?')):'';
+  var dealerCardsH=G.dH.map(function(c,i){return cardHTML(c,(G.pp==='player'||surr)&&i===1);}).join('');
   var handsH=G.pH.map(function(h,idx){
     var faded=G.pp==='player'&&G.aH>=0&&idx!==G.aH?' hand-faded':'';
     var decs=G.curDecs.filter(function(d){return d.handIdx===idx;});
@@ -760,6 +847,48 @@ function render(){
         '<button class="btn btn-action" onclick="resetBankroll()" style="padding:9px 14px;font-size:13px;border-color:#553399;color:#cc99ff">Reset $1k</button>'+
       '</div>'+
       '<button id="deal-btn" class="btn btn-deal" onclick="pDeal()" '+(G.bet<=0||G.bet>G.br?'disabled':'')+'>Deal — bet $'+G.bet+'</button>';
+  }
+
+  function ccBetPanel(){
+    var tc=ccTrueCount(G.cc.run,G.si),rec=ccRampUnits(tc),recD=rec*ccUnit();
+    var rcP=G.cc.rcChecks?Math.round(100*G.cc.rcOk/G.cc.rcChecks):null;
+    var tcP=G.cc.tcChecks?Math.round(100*G.cc.tcOk/G.cc.tcChecks):null;
+    var betP=G.cc.betRounds?Math.round(100*G.cc.betOk/G.cc.betRounds):null;
+    var head='<div class="lab-panel" style="border-color:#1e5a55">'+
+      '<div class="lab-title"><span style="color:#5cd6c0">🃏 Card Counting — Hi-Lo</span>'+
+        '<button onclick="ccEnd()" style="background:none;border:none;color:#553366;font-size:12px;cursor:pointer;font-family:inherit">End</button></div>'+
+      '<div class="lab-stat-row" style="align-items:center">'+
+        '<div>Training wheels: <button onclick="ccToggleWheels()" class="btn btn-action" style="padding:4px 11px;min-height:0;font-size:12px">'+(G.cc.wheels?'ON':'OFF')+'</button></div>'+
+        '<div>Unit <input class="lab-input" style="width:66px;padding:5px 8px;min-height:0" type="number" min="1" value="'+G.cc.unit+'" oninput="ccSetUnit(this.value)"> <span id="cc-unit-hint" style="color:#6688aa">$'+G.cc.unit+'/unit</span></div>'+
+      '</div>'+
+      '<div class="lab-stat-row" style="font-size:11px">'+
+        '<div>Count: <b>'+(rcP!==null?rcP+'% ('+G.cc.rcOk+'/'+G.cc.rcChecks+')':'—')+'</b></div>'+
+        '<div>True count: <b>'+(tcP!==null?tcP+'%':'—')+'</b></div>'+
+        '<div>Bet ramp: <b>'+(betP!==null?betP+'% ('+G.cc.betOk+'/'+G.cc.betRounds+')':'—')+'</b></div>'+
+      '</div>'+
+      '<div style="font-size:11px;color:#5a9c93;margin-top:4px">'+(G.cc.wheels?'Wheels ON — count shown above. Turn OFF to be quizzed.':'Wheels OFF — test mode. You\'ll be spot-checked on the count.')+'</div>'+
+      '</div>';
+    if(!G.cc.wheels&&G.cc.quiz){
+      if(!G.cc.quiz.done){
+        return head+'<div class="lab-setup-panel" style="border-color:#1e5a55">'+
+          '<div class="lab-title"><span style="color:#5cd6c0">🧮 Count check</span></div>'+
+          '<div style="font-size:12px;color:#6688aa;margin-bottom:10px">Before you bet — what is the count right now?</div>'+
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'+
+            '<div><div style="font-size:12px;color:#8899bb;margin-bottom:4px">Running count</div><input id="cc-rc-inp" class="lab-input" style="width:120px" type="number" placeholder="?"></div>'+
+            '<div><div style="font-size:12px;color:#8899bb;margin-bottom:4px">True count</div><input id="cc-tc-inp" class="lab-input" style="width:120px" type="number" placeholder="?"></div>'+
+          '</div>'+
+          '<button class="btn btn-deal" onclick="ccSubmitQuiz()">Check answer</button>'+
+          '</div>';
+      }
+      var q=G.cc.quiz;
+      head+='<div class="lab-update" style="border-color:#1e5a55">'+
+        '<div class="lab-title"><span style="color:#5cd6c0">🧮 Count check</span></div>'+
+        '<div style="font-size:13px;color:#c0d0e0">Running: you <b>'+q.yourRC+'</b> · actual <b>'+(q.correctRC>=0?'+':'')+q.correctRC+'</b> <span class="cc-pill '+(q.rcOk?'cc-ok':'cc-bad')+'">'+(q.rcOk?'✓':'✗')+'</span></div>'+
+        '<div style="font-size:13px;color:#c0d0e0;margin-top:4px">True: you <b>'+q.yourTC+'</b> · actual <b>'+(q.correctTC>=0?'+':'')+q.correctTC+'</b> <span class="cc-pill '+(q.tcOk?'cc-ok':'cc-bad')+'">'+(q.tcOk?'✓':'✗')+'</span></div>'+
+        '</div>';
+    }
+    var rampHint=G.cc.wheels?'<div class="hint-box" style="background:#0d2f2b;border-color:#1e5a55;color:#9fe0d6">💡 True count <strong>'+(tc>=0?'+':'')+tc+'</strong> → bet <strong>'+rec+' unit'+(rec!==1?'s':'')+' = $'+recD+'</strong></div>':'';
+    return head+rampHint+normalBetBlock();
   }
 
   var ctrlH='';
@@ -867,11 +996,14 @@ function render(){
         '<button class="btn btn-deal" onclick="ogInit(document.getElementById(\'og-uv-inp\').value,document.getElementById(\'og-tu-inp\').value)">Start grind</button>'+
         '</div>'+
         normalBetBlock();
+    }else if(G.cc&&G.cc.active){
+      ctrlH=ccBetPanel();
     }else{
       ctrlH=normalBetBlock()+
         '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #0f3460;display:flex;gap:14px;flex-wrap:wrap">'+
           '<button onclick="G.labShow=true;render()" style="background:none;border:none;color:#8888aa;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">🎯 Set up Labouchère</button>'+
           '<button onclick="G.ogShow=true;render()" style="background:none;border:none;color:#8888aa;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">🎲 Set up Oscar\'s Grind</button>'+
+          '<button onclick="ccEnable()" style="background:none;border:none;color:#5cd6c0;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline">🃏 Card counting</button>'+
         '</div>';
     }
   }
@@ -957,10 +1089,31 @@ function render(){
         '<div style="font-size:12px;color:#8888aa;margin-top:4px">Next bet: <b style="color:#5cd6c0">$'+ogBet()+'</b></div>'+
         '</div>';
     }
-    ctrlH=resH+sumH+labUpdH+ogUpdH+
+    var ccUpdH='';
+    if(G.cc&&G.cc.active&&G.cc.lastBet){
+      var lb2=G.cc.lastBet;
+      ccUpdH='<div class="lab-update" style="border-color:#1e5a55">'+
+        '<div class="lab-title"><span style="color:#5cd6c0">🃏 Bet ramp</span></div>'+
+        '<div style="font-size:13px;color:#c0d0e0">True count <b>'+(lb2.tc>=0?'+':'')+lb2.tc+'</b> → suggested <b>$'+lb2.recDollars+'</b> ('+lb2.rec+'u) · you bet <b>$'+lb2.your+'</b> <span class="cc-pill '+(lb2.ok?'cc-ok':'cc-bad')+'">'+(lb2.ok?'✓ on ramp':'✗ off ramp')+'</span></div>'+
+        '</div>';
+    }
+    ctrlH=resH+sumH+labUpdH+ogUpdH+ccUpdH+
       '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">'+
         '<button class="btn btn-next" onclick="pNew()" title="Enter or N">Next hand →</button>'+
         '<span style="font-size:12px;color:#6688aa">Running BS gap: <span style="font-weight:700;color:'+(bsDiff>0?'#e74c3c':bsDiff<0?'#2ecc71':'#6688aa')+'">'+(bsDiff>=0?'+':'')+bsDiff+'</span></span>'+
+      '</div>';
+  }
+
+  var ccHudH='';
+  if(G.cc&&G.cc.active&&G.cc.wheels){
+    var hrun=G.cc.run,hdl=ccDecksLeft(G.si),htc=ccTrueCount(G.cc.run,G.si);
+    ccHudH='<div class="cc-hud">'+
+      '<div class="cc-cell"><span class="cc-k">Running</span><span class="cc-v">'+(hrun>=0?'+':'')+hrun+'</span></div>'+
+      '<div class="cc-sep"></div>'+
+      '<div class="cc-cell"><span class="cc-k">Decks left</span><span class="cc-v">'+hdl.toFixed(1)+'</span></div>'+
+      '<div class="cc-sep"></div>'+
+      '<div class="cc-cell"><span class="cc-k">True count</span><span class="cc-v" style="color:'+(htc>0?'#5cd6c0':htc<0?'#e88a8a':'#d7efe9')+'">'+(htc>=0?'+':'')+htc+'</span></div>'+
+      '<div style="margin-left:auto;font-size:10px;color:#5a9c93">🃏 Hi-Lo</div>'+
       '</div>';
   }
 
@@ -991,6 +1144,7 @@ function render(){
       '<div class="hand-zone"><div class="clbl">Dealer'+dLabel+'</div><div class="cards-row">'+dealerCardsH+'</div></div>'+
       handsH+
     '</div>'+
+    ccHudH+
     '<div class="controls" aria-live="polite">'+ctrlH+'</div>'+
     recent5H+
     '<div style="text-align:center;font-size:11px;color:#334466;margin-top:10px;padding-bottom:1rem">6-deck · Vegas Strip · Blackjack 3:2 · Double any 2 cards · Split once · Dealer hits soft 17 (H17)</div>';
