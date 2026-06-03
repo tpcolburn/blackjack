@@ -1,8 +1,9 @@
 // Blackjack PWA — Service Worker
 // Caches the app so it works offline after the first visit
 
-var CACHE = 'blackjack-v1';
-var FILES = ['/', '/index.html'];
+var CACHE = 'blackjack-v2';
+// Scope-relative so precache works when hosted under a subpath (e.g. /blackjack/ on GitHub Pages)
+var FILES = ['./', './index.html', './sw.js'];
 
 self.addEventListener('install', function(e) {
   e.waitUntil(
@@ -38,7 +39,7 @@ self.addEventListener('fetch', function(e) {
       });
     }).catch(function() {
       // Return cached index as fallback when offline
-      return caches.match('/index.html');
+      return caches.match('./index.html');
     })
   );
 });

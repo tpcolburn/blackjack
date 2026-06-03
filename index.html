@@ -263,6 +263,21 @@ var G = {
 
 function setG(patch){for(var k in patch)G[k]=patch[k]; render();}
 
+// ── PERSISTENCE ────────────────────────────────────────────────
+function saveState(){
+  try{localStorage.setItem('bj_state',JSON.stringify({br:G.br,gs:G.gs,lab:G.lab,og:G.og}));}catch(e){}
+}
+function loadState(){
+  try{
+    var s=JSON.parse(localStorage.getItem('bj_state'));
+    if(!s)return;
+    if(typeof s.br==='number')G.br=s.br;
+    if(s.gs&&s.gs.catStats)G.gs=s.gs;
+    if(s.lab)G.lab=s.lab;
+    if(s.og)G.og=s.og;
+  }catch(e){}
+}
+
 // ── LOGIC ──────────────────────────────────────────────────────
 function doDraw(s,i){var ns=s,ni=i;if(ni>=ns.length-60){ns=mkShoe();ni=0;}return{c:ns[ni],ns:ns,ni:ni+1};}
 
@@ -380,6 +395,13 @@ function pNew(){
 
 function resetBankroll(){
   G.br=1000; G.bet=0; G.lab=null; G.labShow=false; G.og=null; G.ogShow=false; render();
+}
+
+// Update bet without a full re-render, so the input keeps focus while typing
+function setBet(v){
+  G.bet=Math.max(0,Math.min(parseInt(v)||0,G.br));
+  var b=document.getElementById('deal-btn');
+  if(b){b.disabled=G.bet<=0||G.bet>G.br;b.textContent='Deal — bet $'+G.bet;}
 }
 
 function toggleHint(){
@@ -653,6 +675,7 @@ function chartHTML(history,startBr){
 }
 
 function render(){
+  saveState();
   var pct=G.gs.totalDecs?Math.round(100*G.gs.correctDecs/G.gs.totalDecs):null;
   var bsDiff=Math.round(G.gs.bsBr-G.br);
   var el=document.getElementById('app');
@@ -718,11 +741,11 @@ function render(){
       '</div>'+
       '<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">'+
         '<span style="color:#8888aa;font-size:13px;font-weight:600">Bet:</span>'+
-        '<input class="bet-input" type="number" min="0" max="'+G.br+'" value="'+G.bet+'" oninput="G.bet=Math.max(0,Math.min(parseInt(this.value)||0,'+G.br+'));render()">'+
+        '<input id="bet-input" class="bet-input" type="number" min="0" max="'+G.br+'" value="'+G.bet+'" oninput="setBet(this.value)">'+
         '<button class="btn btn-action" onclick="G.bet=0;render()" style="padding:9px 14px;font-size:13px" '+(G.bet===0?'disabled':'')+'>Clear bet</button>'+
         '<button class="btn btn-action" onclick="resetBankroll()" style="padding:9px 14px;font-size:13px;border-color:#553399;color:#cc99ff">Reset $1k</button>'+
       '</div>'+
-      '<button class="btn btn-deal" onclick="pDeal()" '+(G.bet<=0||G.bet>G.br?'disabled':'')+'>Deal — bet $'+G.bet+'</button>';
+      '<button id="deal-btn" class="btn btn-deal" onclick="pDeal()" '+(G.bet<=0||G.bet>G.br?'disabled':'')+'>Deal — bet $'+G.bet+'</button>';
   }
 
   var ctrlH='';
@@ -842,13 +865,14 @@ function render(){
     ctrlH=(G.hint?'<div class="hint-box">💡 <strong>'+G.hint.a.toUpperCase()+'</strong> — '+G.hint.r+'</div>':'')+
       '<div class="controls-label">Your turn'+(G.pH.length>1?' — Hand '+(G.aH+1)+' of '+G.pH.length:'')+' &nbsp;·&nbsp; bet: $'+G.pB[G.aH]+'</div>'+
       '<div class="btn-row">'+
-        '<button class="btn btn-action" onclick="pHit()">Hit</button>'+
-        '<button class="btn btn-action" onclick="pStand()">Stand</button>'+
-        '<button class="btn btn-action" onclick="pDouble()" '+(canDbl()?'':'disabled')+'>Double $'+(G.aH>=0?G.pB[G.aH]:'')+'</button>'+
-        '<button class="btn btn-action" onclick="pSplit()" '+(canSpl()?'':'disabled')+'>Split $'+(G.aH>=0?G.pB[G.aH]:'')+'</button>'+
-        '<button class="btn btn-action" onclick="pSurrender()" '+(canSurrender()?'':'disabled')+' style="background:#1a1030;border-color:#553399;color:#cc99ff">Surrender</button>'+
+        '<button class="btn btn-action" onclick="pHit()"><u>H</u>it</button>'+
+        '<button class="btn btn-action" onclick="pStand()"><u>S</u>tand</button>'+
+        '<button class="btn btn-action" onclick="pDouble()" '+(canDbl()?'':'disabled')+'><u>D</u>ouble $'+(G.aH>=0?G.pB[G.aH]:'')+'</button>'+
+        '<button class="btn btn-action" onclick="pSplit()" '+(canSpl()?'':'disabled')+'>S<u>p</u>lit $'+(G.aH>=0?G.pB[G.aH]:'')+'</button>'+
+        '<button class="btn btn-action" onclick="pSurrender()" '+(canSurrender()?'':'disabled')+' style="background:#1a1030;border-color:#553399;color:#cc99ff">Su<u>r</u>render</button>'+
       '</div>'+
-      '<button class="btn-hint-link" onclick="toggleHint()">'+(G.hint?'▲ hide hint':'💡 basic strategy hint')+'</button>';
+      '<button class="btn-hint-link" onclick="toggleHint()">'+(G.hint?'▲ hide hint':'💡 basic strategy hint')+'</button>'+
+      '<div style="font-size:10px;color:#445577;margin-top:8px">Keys: H · S · D · P · R · ? (hint)</div>';
   }
   if(G.pp==='done'&&G.oc){
     var actualNet=G.br-G.preDealBr;
@@ -921,7 +945,7 @@ function render(){
     }
     ctrlH=resH+sumH+labUpdH+ogUpdH+
       '<div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">'+
-        '<button class="btn btn-next" onclick="pNew()">Next hand →</button>'+
+        '<button class="btn btn-next" onclick="pNew()" title="Enter or N">Next hand →</button>'+
         '<span style="font-size:12px;color:#6688aa">Running BS gap: <span style="font-weight:700;color:'+(bsDiff>0?'#e74c3c':bsDiff<0?'#2ecc71':'#6688aa')+'">'+(bsDiff>=0?'+':'')+bsDiff+'</span></span>'+
       '</div>';
   }
@@ -953,11 +977,37 @@ function render(){
       '<div class="hand-zone"><div class="clbl">Dealer'+dLabel+'</div><div class="cards-row">'+dealerCardsH+'</div></div>'+
       handsH+
     '</div>'+
-    '<div class="controls">'+ctrlH+'</div>'+
+    '<div class="controls" aria-live="polite">'+ctrlH+'</div>'+
     recent5H+
     '<div style="text-align:center;font-size:11px;color:#334466;margin-top:10px;padding-bottom:1rem">6-deck · Vegas Strip · Blackjack 3:2 · Double any 2 cards · Split once · Dealer hits soft 17 (H17)</div>';
 }
 
+// ── KEYBOARD SHORTCUTS ─────────────────────────────────────────
+document.addEventListener('keydown',function(e){
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  var t=e.target,tag=t&&t.tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return; // don't hijack typing
+  if(G.screen!=='game')return;
+  var k=e.key.toLowerCase();
+  var focusBtn=document.activeElement&&document.activeElement.tagName==='BUTTON';
+  if(G.pp==='player'){
+    if(k==='h'){e.preventDefault();pHit();}
+    else if(k==='s'){e.preventDefault();pStand();}
+    else if(k==='d'&&canDbl()){e.preventDefault();pDouble();}
+    else if(k==='p'&&canSpl()){e.preventDefault();pSplit();}
+    else if(k==='r'&&canSurrender()){e.preventDefault();pSurrender();}
+    else if(e.key==='?'){e.preventDefault();toggleHint();}
+  }else if(G.pp==='done'){
+    if((e.key==='Enter'&&!focusBtn)||k==='n'){e.preventDefault();pNew();}
+  }else if(G.pp==='bet'){
+    if(e.key==='Enter'&&!focusBtn){
+      var deal=document.querySelector('.btn-deal:not([disabled])');
+      if(deal){e.preventDefault();deal.click();}
+    }
+  }
+});
+
+loadState();
 render();
 </script>
 
