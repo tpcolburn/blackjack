@@ -207,7 +207,7 @@ function resolveHands(pHands,dHand,bets,splitArr){
 
 function drawFrom(s,i){
   var ns=s,ni=i;
-  if(ni>=ns.length-60){ns=mkShoe();ni=0;}
+  if(ni>=ns.length){ns=mkShoe();ni=0;} // safety net only; cut-card reshuffle happens between rounds in pDeal
   return{c:ns[ni],ns:ns,ni:ni+1};
 }
 
@@ -286,7 +286,7 @@ function loadState(){
 }
 
 // ── LOGIC ──────────────────────────────────────────────────────
-function doDraw(s,i){var ns=s,ni=i;if(ni>=ns.length-60){ns=mkShoe();ni=0;}return{c:ns[ni],ns:ns,ni:ni+1};}
+function doDraw(s,i){var ns=s,ni=i;if(ni>=ns.length){ns=mkShoe();ni=0;}return{c:ns[ni],ns:ns,ni:ni+1};}
 
 function recDec(hand,dealerUp,action,cd,cs){
   var csr=hand.length===2&&!G.splt[G.aH];
@@ -318,6 +318,8 @@ function finalizeStats(actualNet,decs,newBrVal){
 function pDeal(){
   var bet=G.bet,br=G.br;
   if(bet<=0||bet>br)return;
+  // Cut card: if we passed it on a prior round, reshuffle now — between rounds, never mid-hand
+  if(G.si>=G.shoe.length-60){G.shoe=mkShoe();G.si=0;}
   var s=G.shoe,i=G.si;
   function d(){var r=doDraw(s,i);s=r.ns;i=r.ni;return r.c;}
   var ph=[d(),d()],dh=[d(),d()];
