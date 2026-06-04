@@ -139,6 +139,12 @@ html { height: -webkit-fill-available; }
 .cc-pill { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 12px; }
 .cc-ok { color: #2ecc71; background: rgba(39,174,96,0.16); }
 .cc-bad { color: #e74c3c; background: rgba(231,76,60,0.16); }
+.felt { position: relative; }
+.luck-badge { position: absolute; top: 8px; right: 8px; border: 1.5px solid; border-radius: 12px; padding: 5px 10px 6px; text-align: center; min-width: 76px; z-index: 5; pointer-events: none; font-variant-numeric: tabular-nums; }
+.luck-badge .lb-main { font-size: 10px; font-weight: 800; letter-spacing: .6px; opacity: .95; }
+.luck-badge .lb-score { font-size: 21px; font-weight: 800; line-height: 1.05; }
+.luck-badge .lb-score .lb-u { font-size: 11px; font-weight: 700; opacity: .7; margin-left: 1px; }
+.luck-badge .lb-sess { font-size: 9px; font-weight: 600; opacity: .62; margin-top: 1px; letter-spacing: .3px; }
 </style>
 </head>
 <body>
@@ -279,14 +285,15 @@ var G = {
       catStats:{hard:{ok:0,n:0},soft:{ok:0,n:0},pair:{ok:0,n:0}}},
   lab:null, labShow:false,
   og:null, ogShow:false,
-  cc:null
+  cc:null,
+  luck:{shoe:0,sess:0}, ra:1, rtc:null  // ra=round action (flat units exposed), rtc=round-start true count
 };
 
 function setG(patch){for(var k in patch)G[k]=patch[k]; render();}
 
 // ── PERSISTENCE ────────────────────────────────────────────────
 function saveState(){
-  try{localStorage.setItem('bj_state',JSON.stringify({br:G.br,gs:G.gs,lab:G.lab,og:G.og,cc:G.cc}));}catch(e){}
+  try{localStorage.setItem('bj_state',JSON.stringify({br:G.br,gs:G.gs,lab:G.lab,og:G.og,cc:G.cc,luck:G.luck}));}catch(e){}
 }
 function loadState(){
   try{
@@ -297,6 +304,7 @@ function loadState(){
     if(s.lab)G.lab=s.lab;
     if(s.og)G.og=s.og;
     if(s.cc)G.cc=s.cc;
+    if(s.luck&&typeof s.luck.shoe==='number')G.luck=s.luck;
   }catch(e){}
 }
 
@@ -341,6 +349,34 @@ function ccSubmitQuiz(){
   render();
 }
 
+// ── LUCK METER (EV-adjusted residual, flat units) ──────────────
+// luck = actual − expected, summed. actual normalizes out the bet ramp;
+// expected = house edge (+ count edge when counting is on) × units exposed.
+// Neutral shoe ⇒ ~0. Tracked always; shoe resets on reshuffle, sess on bankroll reset.
+function luckEdge(){var e=-0.006; if(typeof G.rtc==='number')e+=0.005*G.rtc; return e;}
+function luckUpdate(actualNet){
+  var base=G.bet; if(!base||base<=0)return;
+  var actual=actualNet/base;            // flat-unit result, independent of how much was wagered
+  var expected=luckEdge()*(G.ra||1);    // edge × units exposed this round (doubles/splits add)
+  var resid=actual-expected;
+  G.luck.shoe+=resid; G.luck.sess+=resid;
+}
+function fmtU(x){return (x>=0?'+':'')+x.toFixed(1);}
+function luckStyle(s){
+  var a=Math.abs(s), inten=Math.min(1,a/10);
+  if(s>=2){var m=Math.round(inten*120);
+    return {emoji:'🔥',label:a>6?'HOT':'WARM',
+      bg:'linear-gradient(180deg,rgba('+(150+m*0.5)+',64,48,0.94),rgba('+(96+m*0.4)+',34,28,0.94))',
+      border:'rgba(231,90,60,'+(0.45+inten*0.5)+')',glow:'0 0 '+(6+inten*16)+'px rgba(231,76,60,'+(inten*0.55)+')',txt:'#ffe0d8'};}
+  if(s<=-2){var c=Math.round(inten*120);
+    return {emoji:'🧊',label:a>6?'COLD':'COOL',
+      bg:'linear-gradient(180deg,rgba(40,72,'+(150+c*0.5)+',0.94),rgba(24,44,'+(96+c*0.4)+',0.94))',
+      border:'rgba(72,160,219,'+(0.45+inten*0.5)+')',glow:'0 0 '+(6+inten*16)+'px rgba(52,152,219,'+(inten*0.55)+')',txt:'#dcf0ff'};}
+  return {emoji:'⚖️',label:'EVEN',
+    bg:'linear-gradient(180deg,rgba(62,68,92,0.92),rgba(42,46,66,0.92))',
+    border:'rgba(140,150,180,0.45)',glow:'none',txt:'#cad0e2'};
+}
+
 // ── LOGIC ──────────────────────────────────────────────────────
 function doDraw(s,i){var ns=s,ni=i;if(ni>=ns.length){ns=mkShoe();ni=0;}return{c:ns[ni],ns:ns,ni:ni+1};}
 
@@ -369,19 +405,22 @@ function finalizeStats(actualNet,decs,newBrVal){
   G.gs={hands:gs.hands+1,totalDecs:gs.totalDecs+decs.length,correctDecs:gs.correctDecs+decs.filter(function(d){return d.correct;}).length,bsBr:newBsBr,history:gs.history.concat([rec]).slice(-100),catStats:newCat};
   labUpdate(actualNet);
   ogUpdate(actualNet);
+  luckUpdate(actualNet);
 }
 
 function pDeal(){
   var bet=G.bet,br=G.br;
   if(bet<=0||bet>br)return;
   // Cut card: if we passed it on a prior round, reshuffle now — between rounds, never mid-hand
-  if(G.si>=G.shoe.length-60){G.shoe=mkShoe();G.si=0; if(G.cc&&G.cc.active){G.cc.run=0;G.cc.counted={};}}
+  if(G.si>=G.shoe.length-60){G.shoe=mkShoe();G.si=0; G.luck.shoe=0; if(G.cc&&G.cc.active){G.cc.run=0;G.cc.counted={};}}
   // Card-counting: grade the bet ramp against the true count going into this round
   if(G.cc&&G.cc.active){
     var _tc=ccTrueCount(G.cc.run,G.si),_rec=ccRampUnits(_tc),_yu=Math.round(bet/ccUnit());
     var _ok=_yu===_rec; G.cc.betRounds++; if(_ok)G.cc.betOk++;
     G.cc.lastBet={tc:_tc,rec:_rec,recDollars:_rec*ccUnit(),your:bet,yourUnits:_yu,ok:_ok};
   }
+  // Luck meter: 1 unit of action to start; capture the true count going in (null when not counting)
+  G.ra=1; G.rtc=(G.cc&&G.cc.active)?ccTrueCount(G.cc.run,G.si):null;
   var s=G.shoe,i=G.si;
   function d(){var r=doDraw(s,i);s=r.ns;i=r.ni;return r.c;}
   var ph=[d(),d()],dh=[d(),d()];
@@ -436,7 +475,7 @@ function pDouble(){
   var nh=G.pH.slice();nh[aH]=nh[aH].concat([r.c]);
   var ex=pB[aH];pB[aH]*=2;
   var nb=br-ex;
-  G.shoe=s;G.si=i;G.hint=null;G.pH=nh;G.pB=pB;G.br=nb;ccReveal([r.c]);
+  G.shoe=s;G.si=i;G.hint=null;G.pH=nh;G.pB=pB;G.br=nb;G.ra++;ccReveal([r.c]);
   advance(nh,pB,splt,aH+1,dH,s,i,nb);
 }
 
@@ -450,7 +489,7 @@ function pSplit(){
   var nh=G.pH.slice();nh.splice(aH,1,h0,h1);
   var ob=pB[aH];pB.splice(aH,1,ob,ob);
   splt.splice(aH,1,true,true);
-  G.shoe=s;G.si=i;G.pH=nh;G.pB=pB;G.splt=splt;G.br=br-ob;G.hint=null;
+  G.shoe=s;G.si=i;G.pH=nh;G.pB=pB;G.splt=splt;G.br=br-ob;G.hint=null;G.ra++;
   render();
 }
 
@@ -474,7 +513,7 @@ function pNew(){
 }
 
 function resetBankroll(){
-  G.br=1000; G.bet=0; G.lab=null; G.labShow=false; G.og=null; G.ogShow=false; render();
+  G.br=1000; G.bet=0; G.lab=null; G.labShow=false; G.og=null; G.ogShow=false; G.luck={shoe:0,sess:0}; render();
 }
 
 // Update bet without a full re-render, so the input keeps focus while typing
@@ -1117,6 +1156,13 @@ function render(){
       '</div>';
   }
 
+  var ls=luckStyle(G.luck.shoe);
+  var luckBadgeH='<div class="luck-badge" style="background:'+ls.bg+';border-color:'+ls.border+';box-shadow:'+ls.glow+';color:'+ls.txt+'" title="How lucky this shoe has run vs. expectation (flat units)">'+
+    '<div class="lb-main">'+ls.emoji+' '+ls.label+'</div>'+
+    '<div class="lb-score">'+fmtU(G.luck.shoe)+'<span class="lb-u">u</span></div>'+
+    '<div class="lb-sess">session '+fmtU(G.luck.sess)+'u</div>'+
+  '</div>';
+
   var recent5H='';
   if(G.gs.history.length>0){
     var last5=G.gs.history.slice(-5);
@@ -1141,6 +1187,7 @@ function render(){
       '<button class="nav-btn" onclick="G.screen=\'stats\';render()">📊 Stats'+(G.gs.hands>0?' ('+G.gs.hands+')':'')+'</button>'+
     '</div>'+
     '<div class="felt">'+
+      luckBadgeH+
       '<div class="hand-zone"><div class="clbl">Dealer'+dLabel+'</div><div class="cards-row">'+dealerCardsH+'</div></div>'+
       handsH+
     '</div>'+
