@@ -189,7 +189,7 @@ function strat(ph,du,cd,cs,csr){
     if(t>=20)return{a:'stand',r:'Soft '+t+' — always stand.'};
     if(t===19)return(d===4&&cd)?{a:'double',r:'Soft 19 vs dealer 6 — double.'}:{a:'stand',r:'Soft 19 — stand.'};
     if(t===18){
-      if(d<=4&&cd)return{a:'double',r:'Soft 18 (A-7) vs dealer 2-6 — double. Dealer is weak.'};
+      if(d<=4)return cd?{a:'double',r:'Soft 18 (A-7) vs dealer 2-6 — double. Dealer is weak.'}:{a:'stand',r:"Soft 18 (A-7) vs dealer 2-6 — stand when you can't double."};
       if(d===5||d===6)return{a:'stand',r:'Soft 18 vs dealer 7-8 — stand.'};
       return{a:'hit',r:'Soft 18 vs 9/10/Ace — hit to improve.'};
     }
@@ -295,7 +295,17 @@ function setG(patch){for(var k in patch)G[k]=patch[k]; render();}
 
 // ── PERSISTENCE ────────────────────────────────────────────────
 function saveState(){
-  try{localStorage.setItem('bj_state',JSON.stringify({br:G.br,gs:G.gs,lab:G.lab,og:G.og,cc:G.cc,luck:G.luck}));}catch(e){}
+  try{
+    var data={br:G.br,gs:G.gs,lab:G.lab,og:G.og,cc:G.cc,luck:G.luck,shoe:G.shoe,si:G.si};
+    // Persist the in-progress hand so a reload/close mid-hand resumes instead of forfeiting the wagered bet.
+    if(G.pp!=='bet'){
+      var sv=G.savedHand;
+      data.game={pp:G.pp,pH:G.pH,pB:G.pB,splt:G.splt,dH:G.dH,aH:G.aH,oc:G.oc,bet:G.bet,
+        preDealBr:G.preDealBr,handDecs:G.handDecs,curDecs:G.curDecs,handBsNet:G.handBsNet,ra:G.ra,rtc:G.rtc,
+        saved:sv?{si:sv.si,playerHand:sv.playerHand,dealerHand:sv.dealerHand,bet:sv.bet}:null};
+    }
+    localStorage.setItem('bj_state',JSON.stringify(data));
+  }catch(e){}
 }
 function loadState(){
   try{
@@ -307,6 +317,19 @@ function loadState(){
     if(s.og)G.og=s.og;
     if(s.cc)G.cc=s.cc;
     if(s.luck&&typeof s.luck.shoe==='number')G.luck=s.luck;
+    // Restore shoe position (keeps penetration + running count consistent across reloads)
+    if(s.shoe&&s.shoe.length){G.shoe=s.shoe; G.si=(typeof s.si==='number')?s.si:0;}
+    // Resume an in-progress hand if one was saved
+    if(s.game){
+      var g=s.game;
+      G.pp=g.pp; G.pH=g.pH||[[]]; G.pB=g.pB||[25]; G.splt=g.splt||[false];
+      G.dH=g.dH||[]; G.aH=(typeof g.aH==='number')?g.aH:0; G.oc=g.oc||null;
+      G.bet=g.bet||0; G.preDealBr=(typeof g.preDealBr==='number')?g.preDealBr:G.br;
+      G.handDecs=g.handDecs||[]; G.curDecs=g.curDecs||[];
+      G.handBsNet=(typeof g.handBsNet==='number')?g.handBsNet:null;
+      G.ra=g.ra||1; G.rtc=(typeof g.rtc==='number')?g.rtc:null;
+      if(g.saved)G.savedHand={shoe:G.shoe,si:g.saved.si,playerHand:g.saved.playerHand,dealerHand:g.saved.dealerHand,bet:g.saved.bet};
+    }
   }catch(e){}
 }
 
@@ -456,7 +479,7 @@ function advance(hands,bets,splits,next,dh,s,i,curBr){
 
 function pHit(){
   var hand=G.pH[G.aH],aH=G.aH,dH=G.dH,pB=G.pB,splt=G.splt,br=G.br;
-  recDec(hand,dH[0],'hit',hand.length===2&&br>=pB[aH],hand.length===2&&isPair(hand)&&br>=pB[aH]&&G.pH.length<3);
+  recDec(hand,dH[0],'hit',hand.length===2&&br>=pB[aH],hand.length===2&&isPair(hand)&&br>=pB[aH]&&G.pH.length<4);
   var s=G.shoe,i=G.si,r=doDraw(s,i);s=r.ns;i=r.ni;
   G.shoe=s;G.si=i;G.hint=null;ccReveal([r.c]);
   var nh=G.pH.slice();nh[aH]=nh[aH].concat([r.c]);G.pH=nh;
@@ -466,13 +489,13 @@ function pHit(){
 
 function pStand(){
   var hand=G.pH[G.aH],aH=G.aH,dH=G.dH,pB=G.pB,splt=G.splt,br=G.br;
-  recDec(hand,dH[0],'stand',hand.length===2&&br>=pB[aH],hand.length===2&&isPair(hand)&&br>=pB[aH]&&G.pH.length<3);
+  recDec(hand,dH[0],'stand',hand.length===2&&br>=pB[aH],hand.length===2&&isPair(hand)&&br>=pB[aH]&&G.pH.length<4);
   advance(G.pH,pB,splt,aH+1,dH,G.shoe,G.si,br);
 }
 
 function pDouble(){
   var hand=G.pH[G.aH],aH=G.aH,dH=G.dH,pB=G.pB.slice(),splt=G.splt,br=G.br;
-  recDec(hand,dH[0],'double',true,isPair(hand)&&br>=2*pB[aH]&&G.pH.length<3);
+  recDec(hand,dH[0],'double',true,isPair(hand)&&br>=2*pB[aH]&&G.pH.length<4);
   var s=G.shoe,i=G.si,r=doDraw(s,i);s=r.ns;i=r.ni;
   var nh=G.pH.slice();nh[aH]=nh[aH].concat([r.c]);
   var ex=pB[aH];pB[aH]*=2;
@@ -531,14 +554,14 @@ function setBet(v){
 function toggleHint(){
   if(G.hint){G.hint=null;render();return;}
   if(G.aH<0||!G.dH[0])return;
-  var hand=G.pH[G.aH],cd=hand.length===2&&G.br>=G.pB[G.aH],cs=hand.length===2&&isPair(hand)&&G.br>=G.pB[G.aH]&&G.pH.length<3;
+  var hand=G.pH[G.aH],cd=hand.length===2&&G.br>=G.pB[G.aH],cs=hand.length===2&&isPair(hand)&&G.br>=G.pB[G.aH]&&G.pH.length<4;
   var csr=hand.length===2&&!G.splt[G.aH];
   G.hint=strat(hand,G.dH[0],cd,cs,csr);
   render();
 }
 
 function canDbl(){return G.aH>=0&&G.aH<G.pH.length&&G.pH[G.aH]&&G.pH[G.aH].length===2&&G.br>=G.pB[G.aH];}
-function canSpl(){return G.aH>=0&&G.aH<G.pH.length&&G.pH[G.aH]&&isPair(G.pH[G.aH])&&G.pH[G.aH].length===2&&G.br>=G.pB[G.aH]&&G.pH.length<3;}
+function canSpl(){return G.aH>=0&&G.aH<G.pH.length&&G.pH[G.aH]&&isPair(G.pH[G.aH])&&G.pH[G.aH].length===2&&G.br>=G.pB[G.aH]&&G.pH.length<4;}
 function canSurrender(){return G.aH>=0&&G.aH<G.pH.length&&G.pH[G.aH]&&G.pH[G.aH].length===2&&!G.splt[G.aH];}
 
 // ── LABOUCHÈRE ─────────────────────────────────────────────────
@@ -748,7 +771,7 @@ function mcRun(){
 function pSurrender(){
   if(!canSurrender())return;
   var aH=G.aH,hand=G.pH[aH],bet=G.pB[aH];
-  recDec(hand,G.dH[0],'surrender',true,isPair(hand)&&G.br>=bet&&G.pH.length<3);
+  recDec(hand,G.dH[0],'surrender',true,isPair(hand)&&G.br>=bet&&G.pH.length<4);
   var returnAmt=Math.floor(bet/2);
   var newBr=G.br+returnAmt;
   G.br=newBr; G.pp='done'; G.aH=-1; G.hint=null;
@@ -1199,7 +1222,7 @@ function render(){
     ccHudH+
     '<div class="controls" aria-live="polite">'+ctrlH+'</div>'+
     recent5H+
-    '<div style="text-align:center;font-size:11px;color:#334466;margin-top:10px;padding-bottom:1rem">6-deck · Vegas Strip · Blackjack 3:2 · Double any 2 cards · Split once · Dealer hits soft 17 (H17)</div>';
+    '<div style="text-align:center;font-size:11px;color:#334466;margin-top:10px;padding-bottom:1rem">6-deck · Vegas Strip · Blackjack 3:2 · Double any 2 cards · Split/resplit to 4 hands (Aces: one card) · Dealer hits soft 17 (H17)</div>';
 }
 
 // ── KEYBOARD SHORTCUTS ─────────────────────────────────────────
