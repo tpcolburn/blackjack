@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Blackjack">
 <meta name="theme-color" content="#1a1a2e">
+<link rel="manifest" href="manifest.webmanifest">
 <title>Blackjack — Trainer + Play</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -175,7 +176,7 @@ function strat(ph,du,cd,cs,csr){
   if(isPair(ph)&&cs){
     var pv=(['J','Q','K'].indexOf(ph[0].v)>=0)?'T':ph[0].v;
     if(pv==='A')return{a:'split',r:'Always split Aces — each Ace as a starting card is very powerful.'};
-    if(pv==='8')return{a:'split',r:'Always split 8s — hard 16 is the worst hand in blackjack.'};
+    if(pv==='8')return(csr&&d===9)?{a:'surrender',r:'Pair of 8s vs dealer Ace — surrender. In H17, splitting into two hands that each start with 8 against an Ace loses more than giving up half.'}:{a:'split',r:'Always split 8s — hard 16 is the worst hand in blackjack.'};
     if(pv==='T'||pv==='10')return{a:'stand',r:"Never split 10s — you have 20, which basic strategy never breaks up."};
     if(pv==='9'){if(d===5||d===8||d===9)return{a:'stand',r:'Stand 9s vs dealer 7, 10, Ace.'}; return{a:'split',r:'Split 9s vs 2-6 and 8-9.'};}
     if(pv==='7')return d<=5?{a:'split',r:'Split 7s vs dealer 2-7.'}:{a:'hit',r:'Hit 7-7 vs dealer 8+.'};
@@ -196,10 +197,11 @@ function strat(ph,du,cd,cs,csr){
     if(t>=15)return(d>=2&&d<=4&&cd)?{a:'double',r:'Soft '+t+' vs dealer 4-6 — double.'}:{a:'hit',r:'Soft '+t+' — hit.'};
     return(d>=3&&d<=4&&cd)?{a:'double',r:'Soft '+t+' vs dealer 5-6 — double.'}:{a:'hit',r:'Soft '+t+' — hit.'};
   }
+  if(csr&&t===17&&d===9)return{a:'surrender',r:'Hard 17 vs dealer Ace — surrender. In H17 (dealer hits soft 17) the Ace is strong enough that giving up half beats standing on a hard 17.'};
   if(t>=17)return{a:'stand',r:'Hard '+t+' — stand at 17+.'};
   if(csr){
     if(t===16&&(d===7||d===8||d===9))return{a:'surrender',r:'Hard 16 vs dealer 9, 10, or Ace — surrender. You lose less giving up half your bet than playing it out.'};
-    if(t===15&&d===8)return{a:'surrender',r:'Hard 15 vs dealer 10 — surrender. The math favors giving up half over playing.'};
+    if(t===15&&(d===8||d===9))return{a:'surrender',r:'Hard 15 vs dealer 10 or Ace — surrender. The math favors giving up half over playing.'};
   }
   if(t>=13)return d<=4?{a:'stand',r:'Hard '+t+' vs dealer 2-6 — stand (let dealer bust).'}:{a:'hit',r:'Hard '+t+' vs dealer 7+ — must hit.'};
   if(t===12)return(d>=2&&d<=4)?{a:'stand',r:'Hard 12 vs dealer 4-6 — stand.'}:{a:'hit',r:'Hard 12 — hit vs 2, 3, 7+.'};
@@ -489,8 +491,11 @@ function pSplit(){
   var nh=G.pH.slice();nh.splice(aH,1,h0,h1);
   var ob=pB[aH];pB.splice(aH,1,ob,ob);
   splt.splice(aH,1,true,true);
-  G.shoe=s;G.si=i;G.pH=nh;G.pB=pB;G.splt=splt;G.br=br-ob;G.hint=null;G.ra++;
-  render();
+  var nb=br-ob;
+  G.shoe=s;G.si=i;G.pH=nh;G.pB=pB;G.splt=splt;G.br=nb;G.hint=null;G.ra++;
+  // Split aces draw one card each, then stand — standard Vegas Strip rule (no hit, double, or resplit).
+  if(hand[0].v==='A')advance(nh,pB,splt,nh.length,dH,s,i,nb);
+  else render();
 }
 
 function pNew(){
